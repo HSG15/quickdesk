@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.api.deps import get_current_user, require_agent
+from app.api.deps import get_current_user, require_agent, require_agent_from_token_or_query
 from app.db.session import get_db
 from app.models.user import User
 from app.models.ticket import Ticket
@@ -12,12 +13,14 @@ from app.models.audit import OverrideAuditLog
 from app.schemas.ticket import (
     TicketCreate,
     TicketResponse,
+    TicketMetricsResponse,
     ClassificationOverrideRequest,
     TicketReplyRequest,
     ALLOWED_CATEGORIES,
     ALLOWED_PRIORITIES,
 )
 from app.schemas.audit import OverrideAuditResponse
+from app.services.event_broadcaster import broadcaster
 
 router = APIRouter(prefix="/api/tickets", tags=["Tickets"])
 
@@ -107,6 +110,14 @@ def create_ticket(
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
+
+    # Real-time SSE push to active agent dashboards
+    try:
+        ticket_dto = TicketResponse.model_validate(ticket).model_dump(mode="json")
+        broadcaster.broadcast("ticket_created", ticket_dto)
+    except Exception:
+        pass
+
     return ticket
 
 
@@ -132,6 +143,14 @@ def regenerate_draft_reply(
 
     db.commit()
     db.refresh(ticket)
+
+    # Real-time SSE push for updated draft
+    try:
+        ticket_dto = TicketResponse.model_validate(ticket).model_dump(mode="json")
+        broadcaster.broadcast("ticket_updated", ticket_dto)
+    except Exception:
+        pass
+
     return ticket
 
 
@@ -181,6 +200,100 @@ def get_all_tickets_agent(
         query = query.filter(Ticket.priority == priority)
 
     return query.order_by(Ticket.created_at.desc()).all()
+
+
+@router.get("/events")
+async def ticket_event_stream(
+    current_agent: User = Depends(require_agent_from_token_or_query),
+):
+    """
+    Server-Sent Events (SSE) stream for real-time ticket activity.
+    Pushes 'ticket_created', 'ticket_updated', and 'ticket_resolved' to active support agents.
+    """
+    return StreamingResponse(
+        broadcaster.subscribe(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/metrics", response_model=TicketMetricsResponse)
+def get_ticket_metrics(
+    db: Session = Depends(get_db),
+    current_agent: User = Depends(require_agent),
+):
+    """
+    Calculate live support desk operational metrics:
+    - Total, Open, Resolved ticket counts
+    - Average resolution time (minutes) for resolved tickets
+    - AI Agreement Accuracy: % of tickets where current category & priority match AI suggestion
+    - Total manual override count
+    - Distribution across Category, Priority, and AI method (llm vs fallback)
+    """
+    tickets = db.query(Ticket).all()
+    total = len(tickets)
+    if total == 0:
+        return TicketMetricsResponse(
+            total_tickets=0,
+            open_tickets=0,
+            resolved_tickets=0,
+            avg_resolution_time_minutes=None,
+            ai_accuracy_percentage=100.0,
+            override_count=0,
+            category_distribution={},
+            priority_distribution={},
+            ai_method_distribution={},
+        )
+
+    open_count = sum(1 for t in tickets if t.status == "Open")
+    resolved_count = sum(1 for t in tickets if t.status == "Resolved")
+
+    resolution_durations = []
+    for t in tickets:
+        if t.status == "Resolved" and t.resolved_at and t.created_at:
+            delta = (t.resolved_at - t.created_at).total_seconds() / 60.0
+            if delta >= 0:
+                resolution_durations.append(delta)
+
+    avg_resolution_time = (
+        round(sum(resolution_durations) / len(resolution_durations), 1)
+        if resolution_durations
+        else None
+    )
+
+    agreed_count = sum(
+        1 for t in tickets
+        if t.category == t.ai_suggested_category and t.priority == t.ai_suggested_priority
+    )
+    ai_accuracy = round((agreed_count / total) * 100.0, 1)
+
+    override_count = db.query(OverrideAuditLog).count()
+
+    category_dist = {}
+    priority_dist = {}
+    method_dist = {}
+
+    for t in tickets:
+        category_dist[t.category] = category_dist.get(t.category, 0) + 1
+        priority_dist[t.priority] = priority_dist.get(t.priority, 0) + 1
+        method = t.ai_suggestion_method or "unknown"
+        method_dist[method] = method_dist.get(method, 0) + 1
+
+    return TicketMetricsResponse(
+        total_tickets=total,
+        open_tickets=open_count,
+        resolved_tickets=resolved_count,
+        avg_resolution_time_minutes=avg_resolution_time,
+        ai_accuracy_percentage=ai_accuracy,
+        override_count=override_count,
+        category_distribution=category_dist,
+        priority_distribution=priority_dist,
+        ai_method_distribution=method_dist,
+    )
 
 
 @router.get("/{ticket_id}", response_model=TicketResponse)
@@ -274,6 +387,11 @@ def override_ticket_classification(
     if changed:
         db.commit()
         db.refresh(ticket)
+        try:
+            ticket_dto = TicketResponse.model_validate(ticket).model_dump(mode="json")
+            broadcaster.broadcast("ticket_updated", ticket_dto)
+        except Exception:
+            pass
 
     return ticket
 
@@ -317,6 +435,14 @@ def reply_and_resolve_ticket(
 
     db.commit()
     db.refresh(ticket)
+
+    # Real-time SSE push for resolved ticket
+    try:
+        ticket_dto = TicketResponse.model_validate(ticket).model_dump(mode="json")
+        broadcaster.broadcast("ticket_resolved", ticket_dto)
+    except Exception:
+        pass
+
     return ticket
 
 
@@ -343,3 +469,4 @@ def get_ticket_audit_logs(
         .all()
     )
     return audit_logs
+

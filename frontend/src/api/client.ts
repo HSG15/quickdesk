@@ -1,4 +1,4 @@
-import type { Ticket, AuditLog, User } from '../types'
+import type { Ticket, AuditLog, User, TicketMetrics } from '../types'
 
 const TOKEN_KEY = 'quickdesk_token'
 
@@ -110,5 +110,9 @@ export const api = {
 
   getAuditLogs: async (id: number): Promise<AuditLog[]> => {
     return request<AuditLog[]>(`/api/tickets/${id}/audit`)
+  },
+
+  getMetrics: async (): Promise<TicketMetrics> => {
+    return request<TicketMetrics>('/api/tickets/metrics')
   },
 }

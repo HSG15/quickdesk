@@ -61,3 +61,15 @@ export interface AuditLog {
   new_value: string
   created_at: string
 }
+
+export interface TicketMetrics {
+  total_tickets: number
+  open_tickets: number
+  resolved_tickets: number
+  avg_resolution_time_minutes: number | null
+  ai_accuracy_percentage: number
+  override_count: number
+  category_distribution: Record<string, number>
+  priority_distribution: Record<string, number>
+  ai_method_distribution: Record<string, number>
+}

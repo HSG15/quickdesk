@@ -68,3 +68,16 @@ class ClassificationOverrideRequest(BaseModel):
 
 class TicketReplyRequest(BaseModel):
     reply: str = Field(..., min_length=1, max_length=5000, description="The reviewed and edited final reply")
+
+
+class TicketMetricsResponse(BaseModel):
+    total_tickets: int
+    open_tickets: int
+    resolved_tickets: int
+    avg_resolution_time_minutes: Optional[float] = None
+    ai_accuracy_percentage: float
+    override_count: int
+    category_distribution: dict[str, int]
+    priority_distribution: dict[str, int]
+    ai_method_distribution: dict[str, int]
+

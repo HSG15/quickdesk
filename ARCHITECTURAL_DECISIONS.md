@@ -458,6 +458,107 @@ def generate_rag_reply(title: str, description: str) -> Dict[str, Any]:
   3. When no chunks pass the threshold, the escalation message dynamically routes to the appropriate team (e.g., HR People Operations, Finance, or Workplace Admin) rather than generic IT technical support.
 - **Why this choice**: Eliminates cross-department hallucinations, preserves domain isolation, and ensures employees receive authoritative, relevant answers.
 
+---
+
+# Phase 6: Real-time SSE & Agent Metrics
+
+### Overview
+In Phase 6, QuickDesk implemented real-time event streaming via Server-Sent Events (SSE) and live operational analytics. When employees submit tickets or agents apply overrides, connected agent dashboards receive immediate zero-latency updates without manual polling. The system continuously computes key support desk KPIs including ticket resolution duration, AI classification accuracy against manual overrides, and LLM vs. Fallback engine utilization.
+
+---
+
+### ADR 6.1: Server-Sent Events (SSE) vs. WebSockets for Support Dashboards
+- **Context**: The agent dashboard needs to reflect incoming tickets and ticket status updates immediately.
+- **Decision**: We chose **Server-Sent Events (`text/event-stream`)** over WebSockets.
+- **Why this choice**:
+  - **Unidirectional Match**: Ticket events flow strictly server-to-client (updates pushed to agents). Client-to-server operations (submitting replies, applying overrides) remain standard, RESTful, cacheable HTTP POST/PATCH requests.
+  - **Native Browser Resilience**: Native `EventSource` includes automatic reconnection and exponential backoff out of the box without complex heartbeat/reconnection client code.
+  - **HTTP/2 & Proxy Friendly**: SSE runs over standard HTTP, avoiding firewall blocking, WebSocket upgrade issues, or specialized reverse proxy configurations.
+
+---
+
+### ADR 6.2: In-Memory `asyncio.Queue` Pub/Sub Broker
+- **Context**: The application must run cleanly on a local machine (MacBook Air M1) without requiring a Redis daemon, RabbitMQ, or Kafka cluster.
+- **Decision**: Implemented [`EventBroadcaster`](file:///Users/harishankargiri/Desktop/QuickDesk/backend/app/services/event_broadcaster.py) managing a set of `asyncio.Queue` instances.
+- **Why this choice**:
+  - **Zero External Dependencies**: Operates natively in FastAPI's Python process.
+  - **Non-blocking Broadcasting**: Uses `q.put_nowait()` so calling REST endpoints is instantaneous (< 1 microsecond).
+  - **Connection Liveness**: Sends `: ping\n\n` comments every 20 seconds to prevent corporate proxies from dropping idle connections.
+  - **Graceful Disconnects**: Discarding client queues on disconnect prevents memory leaks.
+
+---
+
+### ADR 6.3: AI Agreement & Metric Calculation Methodology
+- **Context**: Interviewers and stakeholders want to quantify the real-world accuracy of the AI classification engine without manual offline test sets.
+- **Decision**:
+  - QuickDesk stores immutable baselines (`ai_suggested_category`, `ai_suggested_priority`) upon ticket creation alongside active values (`category`, `priority`).
+  - **AI Accuracy (Agreement Rate)** is computed in real time as:
+    $$\text{AI Agreement Rate} = \frac{\text{Count of tickets where } (\text{active category} = \text{AI category} \land \text{active priority} = \text{AI priority})}{\text{Total Tickets}} \times 100$$
+  - Every time an agent overrides a suggestion, an immutable [`OverrideAuditLog`](file:///Users/harishankargiri/Desktop/QuickDesk/backend/app/models/audit.py) entry is recorded.
+- **Why this choice**: Provides an automated, real-time measure of human-in-the-loop validation and flags underperforming prompt rules or categories for fine-tuning.
+
+---
+
+### ADR 6.4: Zero-Dependency Synthesized Audio Alerts via Web Audio API
+- **Context**: Support agents need an audible chime when new tickets arrive, but shipping heavy MP3/WAV assets bloats bundle size and introduces 404 risks.
+- **Decision**: Synthesized a gentle two-tone chime (`D5 -> A5`) using the browser's native `AudioContext` oscillator and gain nodes with exponential volume decay.
+- **Why this choice**: 0 bytes asset size, instant playback, zero network requests, and includes a one-click mute toggle.
+
+---
+
+### Important Code Deep Dives (Phase 6)
+
+#### 1. In-Memory SSE Broadcaster with Keepalive (`backend/app/services/event_broadcaster.py`)
+```python
+class EventBroadcaster:
+    def __init__(self):
+        self._subscribers: Set[asyncio.Queue] = set()
+        self._lock = asyncio.Lock()
+
+    async def subscribe(self) -> AsyncGenerator[str, None]:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        async with self._lock:
+            self._subscribers.add(queue)
+
+        try:
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected'})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # Keepalive prevents proxy timeouts
+        finally:
+            async with self._lock:
+                self._subscribers.discard(queue)
+
+    def broadcast(self, event_type: str, data: Any):
+        message = {"event": event_type, "data": data}
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(message)
+            except asyncio.QueueFull:
+                pass
+```
+*How it works*: Allows any route in FastAPI to broadcast events synchronously without blocking. Subscribers receive SSE-formatted messages with periodic keepalive pings.
+
+---
+
+### Important Interview Questions & Answers (Phase 6)
+
+1. **Q: Why choose Server-Sent Events (SSE) over WebSockets for a support desk dashboard?**
+   - **Answer**: *"We chose SSE because the communication requirement for a support desk is fundamentally unidirectional: the server pushes new tickets and status updates to agents. For client-to-server operations like resolving tickets or applying overrides, RESTful POST/PATCH endpoints are superior because they provide standard status codes, idempotency, and middleware support. Furthermore, SSE runs over standard HTTP/2, includes native browser reconnection logic via `EventSource`, and passes through corporate firewalls without requiring WebSocket upgrade handshakes."*
+
+2. **Q: How do you measure AI classification performance in production without a labeled ground-truth dataset?**
+   - **Answer**: *"We measure AI performance using human-in-the-loop agreement tracking. When a ticket is created, we record the model's suggested category and priority into immutable baseline columns (`ai_suggested_category`, `ai_suggested_priority`). Support agents have the ability to override either field, which generates an audited `OverrideAuditLog` entry. Our metrics endpoint computes the percentage of tickets where the human agent preserved the AI's classification. This produces an automated, continuous accuracy metric that reveals which departments or priorities experience frequent human corrections."*
+
+3. **Q: If QuickDesk were deployed across multiple container instances behind a load balancer, how would the in-memory broadcaster scale?**
+   - **Answer**: *"An in-memory broadcaster only delivers events to clients connected to the same container instance. To scale horizontally across multiple worker nodes, we would replace the local `asyncio.Queue` registry with a lightweight Redis Pub/Sub or PostgreSQL `LISTEN/NOTIFY` channel. When a worker processes an event, it publishes to the Redis channel, and all worker instances consume from Redis and yield to their local SSE client streams. The frontend `EventSource` interface remains 100% unchanged."*
+
+4. **Q: Why must static routes like `/metrics` and `/events` be defined before parameterized routes like `/{ticket_id}` in FastAPI?**
+   - **Answer**: *"FastAPI matches routes in the exact order they are declared on the router. If `/{ticket_id}` (where `ticket_id: int`) is declared before `/metrics`, a request to `/metrics` will match `/{ticket_id}` with `ticket_id='metrics'`. FastAPI attempts to parse the string `'metrics'` as an integer, fails validation, and immediately returns HTTP 422 Unprocessable Entity. Static sub-resource paths must always precede dynamic path variables."*
+
+
 
 
 

@@ -14,9 +14,15 @@ import {
   ChevronRight,
   PlusCircle,
   BookOpen,
+  Activity,
+  Bell,
+  Timer,
+  BarChart3,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import { api, clearStoredToken, getStoredToken } from './api/client'
-import type { User, Ticket, AuditLog, TicketCategory, TicketPriority } from './types'
+import type { User, Ticket, AuditLog, TicketCategory, TicketPriority, TicketMetrics } from './types'
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -46,6 +52,12 @@ export default function App() {
   const [priorityFilter, setPriorityFilter] = useState<string>('')
   const [agentLoading, setAgentLoading] = useState(false)
   const [agentError, setAgentError] = useState<string | null>(null)
+
+  // Phase 6: Real-time SSE & Agent Metrics State
+  const [metrics, setMetrics] = useState<TicketMetrics | null>(null)
+  const [sseConnected, setSseConnected] = useState(false)
+  const [newTicketToast, setNewTicketToast] = useState<string | null>(null)
+  const [audioEnabled, setAudioEnabled] = useState(true)
 
   // Agent Selected Ticket & Override/Reply State
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null)
@@ -108,6 +120,110 @@ export default function App() {
       setAgentLoading(false)
     }
   }
+
+  // Load operational metrics for support agents
+  const loadMetrics = async () => {
+    try {
+      const data = await api.getMetrics()
+      setMetrics(data)
+    } catch {
+      // Ignore background metrics loading error
+    }
+  }
+
+  // Play gentle two-tone chime via Web Audio API
+  const playNotificationChime = () => {
+    if (!audioEnabled) return
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12) // A5
+      gain.gain.setValueAtTime(0.12, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.3)
+    } catch {
+      // AudioContext autoplay or blocked
+    }
+  }
+
+  // Phase 6: Server-Sent Events (SSE) listener for real-time ticket push
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'agent') return
+
+    loadMetrics()
+
+    const token = getStoredToken()
+    if (!token) return
+
+    const eventSource = new EventSource(`/api/tickets/events?token=${encodeURIComponent(token)}`)
+
+    eventSource.addEventListener('connected', () => {
+      setSseConnected(true)
+    })
+
+    eventSource.addEventListener('ticket_created', (e) => {
+      try {
+        const newTicket: Ticket = JSON.parse(e.data)
+        setAgentTickets((prev) => {
+          if (prev.some((t) => t.id === newTicket.id)) return prev
+          return [newTicket, ...prev]
+        })
+        setNewTicketToast(`🔔 New Ticket #${newTicket.id} received: "${newTicket.title}"`)
+        playNotificationChime()
+        loadMetrics()
+      } catch (err) {
+        console.error('Error handling ticket_created SSE:', err)
+      }
+    })
+
+    eventSource.addEventListener('ticket_updated', (e) => {
+      try {
+        const updated: Ticket = JSON.parse(e.data)
+        setAgentTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        setActiveTicket((curr) => (curr && curr.id === updated.id ? updated : curr))
+        loadMetrics()
+      } catch (err) {
+        console.error('Error handling ticket_updated SSE:', err)
+      }
+    })
+
+    eventSource.addEventListener('ticket_resolved', (e) => {
+      try {
+        const resolved: Ticket = JSON.parse(e.data)
+        setAgentTickets((prev) => prev.map((t) => (t.id === resolved.id ? resolved : t)))
+        setActiveTicket((curr) => (curr && curr.id === resolved.id ? resolved : curr))
+        loadMetrics()
+      } catch (err) {
+        console.error('Error handling ticket_resolved SSE:', err)
+      }
+    })
+
+    eventSource.onerror = () => {
+      setSseConnected(false)
+    }
+
+    return () => {
+      eventSource.close()
+      setSseConnected(false)
+    }
+  }, [currentUser, audioEnabled])
+
+  // Auto-dismiss new ticket toast after 5s
+  useEffect(() => {
+    if (!newTicketToast) return
+    const timer = setTimeout(() => setNewTicketToast(null), 5000)
+    return () => clearTimeout(timer)
+  }, [newTicketToast])
 
   const handleLogin = async (e?: React.FormEvent, customEmail?: string, customPass?: string) => {
     if (e) e.preventDefault()
@@ -303,7 +419,7 @@ export default function App() {
             <div>
               <span className="font-semibold text-slate-900 text-lg tracking-tight">QuickDesk</span>
               <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Phase 5: Knowledge Base RAG & Citations
+                Phase 6: Real-time SSE & Agent Metrics
               </span>
             </div>
           </div>
@@ -712,22 +828,141 @@ export default function App() {
           /* AGENT DASHBOARD VIEW                                           */
           /* ============================================================== */
           <div className="space-y-6">
+            {/* Live SSE Status & Controls Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">Support Agent Dashboard</h1>
+                <div className="flex items-center space-x-2">
+                  <h1 className="text-2xl font-bold text-slate-900">Support Agent Dashboard</h1>
+                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Real-time
+                  </span>
+                </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Review incoming tickets, override AI suggestions with audit tracking, and resolve with AI-assisted drafts.
+                  Live ticket triage, instant SSE push events, AI accuracy analytics, and knowledge-grounded resolutions.
                 </p>
               </div>
 
-              {/* Status summary pill */}
-              <div className="flex items-center space-x-2 text-xs">
-                <span className="px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs">
-                  Open: <strong className="text-blue-600">{agentTickets.filter((t) => t.status === 'Open').length}</strong>
-                </span>
-                <span className="px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs">
-                  Resolved: <strong className="text-emerald-600">{agentTickets.filter((t) => t.status === 'Resolved').length}</strong>
-                </span>
+              {/* Status summary pill & SSE indicator */}
+              <div className="flex items-center space-x-2.5 text-xs">
+                {/* Live SSE Pulse Indicator */}
+                <div
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    sseConnected
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      sseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                    }`}
+                  />
+                  <span>{sseConnected ? 'Live SSE Connected' : 'Reconnecting...'}</span>
+                </div>
+
+                {/* Sound Alert Toggle */}
+                <button
+                  onClick={() => setAudioEnabled(!audioEnabled)}
+                  className={`p-1.5 rounded-lg border text-xs transition-colors flex items-center space-x-1 cursor-pointer ${
+                    audioEnabled
+                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                      : 'bg-slate-100 text-slate-400 border-slate-200'
+                  }`}
+                  title={audioEnabled ? 'Audible chime enabled on incoming tickets' : 'Audible chime muted'}
+                >
+                  {audioEnabled ? <Volume2 className="w-4 h-4 text-indigo-600" /> : <VolumeX className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Phase 6: Operational Desk Metrics Bar (4 KPI Cards) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Card 1: Tickets Volume & Resolution Rate */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400">
+                    Ticket Pipeline
+                  </span>
+                  <BarChart3 className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-slate-900">
+                    {metrics?.total_tickets ?? agentTickets.length}
+                  </span>
+                  <span className="text-xs text-slate-500">total tickets</span>
+                </div>
+                <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
+                  <span className="text-blue-600 font-medium">
+                    {metrics?.open_tickets ?? agentTickets.filter((t) => t.status === 'Open').length} Open
+                  </span>
+                  <span className="text-emerald-600 font-medium">
+                    {metrics?.resolved_tickets ?? agentTickets.filter((t) => t.status === 'Resolved').length} Resolved
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 2: Average Resolution Time */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400">
+                    Avg Resolution Time
+                  </span>
+                  <Timer className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-slate-900">
+                    {metrics?.avg_resolution_time_minutes !== null && metrics?.avg_resolution_time_minutes !== undefined
+                      ? `${metrics.avg_resolution_time_minutes}m`
+                      : '< 1m'}
+                  </span>
+                  <span className="text-xs text-slate-400">per ticket</span>
+                </div>
+                <p className="text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+                  Calculated from submission to resolution
+                </p>
+              </div>
+
+              {/* Card 3: AI Accuracy & Overrides */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400">
+                    AI Accuracy (Agreement)
+                  </span>
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                </div>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-bold text-purple-700">
+                    {metrics?.ai_accuracy_percentage !== undefined ? `${metrics.ai_accuracy_percentage}%` : '100%'}
+                  </span>
+                  <span className="text-xs text-slate-500">agreement</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                  <span>Overrides:</span>
+                  <span className="font-mono font-semibold text-slate-700">
+                    {metrics?.override_count ?? 0} audited
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 4: AI Engine Distribution */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400">
+                    AI Routing Engine
+                  </span>
+                  <Activity className="w-4 h-4 text-blue-600" />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                    LLM: {metrics?.ai_method_distribution?.llm ?? 0}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                    Fallback: {metrics?.ai_method_distribution?.fallback ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+                  <span>Groq Cloud / Keyword Heuristics</span>
+                </div>
               </div>
             </div>
 
@@ -1142,10 +1377,19 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
-        QuickDesk • AI Solution Engineer Assessment • Built with FastAPI, React, PostgreSQL & Groq
-      </footer>
+      {/* Real-time Floating Notification Toast */}
+      {newTicketToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 backdrop-blur-xs text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-3 text-xs animate-bounce transition-all">
+          <Bell className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="font-medium text-slate-100">{newTicketToast}</span>
+          <button
+            onClick={() => setNewTicketToast(null)}
+            className="text-slate-400 hover:text-white ml-2 text-sm font-bold cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }
