@@ -179,3 +179,102 @@ def get_password_hash(password: str) -> str:
 3. **Q: How does your database prevent duplicate users or tickets with non-existent employees?**
    - **Answer**: *"We enforce relational integrity at the PostgreSQL engine level. `users.email` has a `UNIQUE` index constraint. `tickets.employee_id` has a `FOREIGN KEY` constraint referencing `users.id` with `ON DELETE CASCADE`. If someone attempts to insert a ticket with a fictitious employee ID, PostgreSQL immediately raises an integrity violation error, preventing orphaned or corrupt records."*
 
+---
+
+## Phase 3: Ticket Workflow, Classification Overrides & Audit Logging
+
+### ADR 3.1: Scoped Query Enforcement for Multi-Tenant Data Isolation
+- **Context**: Employees must only be able to view tickets they authored. Agents must be able to view, search, and filter all company tickets.
+- **Decision**: Distinct endpoints:
+  - `GET /api/tickets/my`: strictly filters by `Ticket.employee_id == current_user.id`.
+  - `GET /api/tickets`: strictly protected by `require_agent`.
+- **Why this choice**: Prevents accidental data exposure where an employee could omit a filter parameter or tamper with query strings to view confidential HR or finance tickets.
+
+---
+
+### ADR 3.2: 404 Not Found vs. 403 Forbidden for Cross-Employee Ticket Access
+- **Context**: An employee could change the URL from `/api/tickets/1` to `/api/tickets/2` to attempt to inspect another employee's ticket.
+- **Decision**: In `GET /api/tickets/{ticket_id}`, if the authenticated user is an employee and `ticket.employee_id != current_user.id`, the backend raises `HTTP 404 Not Found` instead of `HTTP 403 Forbidden`.
+- **Why this choice**:
+  - **Defense against ID Enumeration Attacks**: Returning `403 Forbidden` informs an attacker that ticket #2 exists in the database. Returning `404 Not Found` reveals zero information about whether ticket #2 exists or belongs to someone else.
+
+---
+
+### ADR 3.3: Atomic Audit Trail on Classification Overrides
+- **Context**: Whenever an agent overrides an AI-suggested category or priority, we must guarantee that the ticket update and the audit log entry succeed together or fail together.
+- **Decision**: Both the `ticket.category = new_value` modification and `db.add(OverrideAuditLog(...))` are committed in a single database transaction.
+- **Why this choice**:
+  - Guarantees ACID atomicity: an override can never be saved without its corresponding audit entry.
+  - Submitting an identical value does not create an audit entry, preventing noise in audit reports.
+
+---
+
+### ADR 3.4: Resolution State Locking & Reply Immutability
+- **Context**: An agent could accidentally or maliciously attempt to reply again to an already resolved ticket, potentially overwriting resolution timestamps or final text.
+- **Decision**: When `status == "Resolved"`, subsequent calls to `POST /api/tickets/{id}/reply` are rejected with `HTTP 400 Bad Request: "Ticket is already resolved"`.
+- **Why this choice**:
+  - Enforces deterministic ticket lifecycle states: once resolved, the resolution timestamp `resolved_at` and `final_reply` become an immutable historical record.
+  - Protects resolution duration metrics (`resolved_at - created_at`) from being manipulated.
+
+---
+
+### ADR 3.5: AI Draft Reply Preservation
+- **Context**: The support agent reviews, customizes, or completely rewrites the AI-generated draft before sending it to the employee.
+- **Decision**: In the `tickets` table, `ai_draft_reply` stores the original model generation, while `final_reply` stores the text actually sent to the employee.
+- **Why this choice**:
+  - The AI assists the agent; the human agent is the final authority.
+  - Preserving both enables evaluation: we can compare the human-edited final reply against the AI draft to compute human edit distance and LLM prompt helpfulness.
+
+---
+
+### Important Code Deep Dives (Phase 3)
+
+#### 1. Preventing ID Enumeration via 404 Masking (`backend/app/api/tickets.py`)
+```python
+@router.get("/{ticket_id}", response_model=TicketResponse)
+def get_ticket_detail(ticket_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # Cross-employee authorization check: return 404 to avoid ID enumeration
+    if current_user.role == "employee" and ticket.employee_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    return ticket
+```
+*How it works*: If Employee Bob (id=2) requests ticket #3 (authored by Charlie, id=3), the check evaluates to `True` and raises `HTTP 404`. Bob receives the identical response as if ticket #3 never existed.
+
+#### 2. Atomic Audit Logging with Value Difference Verification (`backend/app/api/tickets.py`)
+```python
+if override_in.category is not None and override_in.category != ticket.category:
+    audit_entry = OverrideAuditLog(
+        ticket_id=ticket.id,
+        agent_id=current_agent.id,
+        field_name="category",
+        old_value=ticket.category,
+        new_value=override_in.category,
+    )
+    db.add(audit_entry)
+    ticket.category = override_in.category
+    changed = True
+
+if changed:
+    db.commit()
+```
+*How it works*: Only if `new_value != current_value` is an `OverrideAuditLog` instantiated. Both the ticket update and audit entry are committed in the same database transaction.
+
+---
+
+### Important Interview Questions & Answers (Phase 3)
+
+1. **Q: Why return HTTP 404 instead of HTTP 403 when an employee requests another employee's ticket?**
+   - **Answer**: *"Returning 403 leaks metadata. It tells an adversary that a ticket with that ID exists and is protected. By returning 404, we maintain zero-knowledge: an employee cannot scan IDs to determine how many tickets exist or infer confidential ticket activity across the organization."*
+
+2. **Q: How do you prevent an agent override from creating false audit records if they click submit without changing anything?**
+   - **Answer**: *"In our backend PATCH route, we perform a value-difference check before instantiating the audit record. We check `if override_in.category != ticket.category`. If the values are identical, no row is written to `override_audit_logs`, keeping the audit trail clean and tamper-evident."*
+
+3. **Q: How does QuickDesk ensure that AI suggestions do not automatically email or reply to users without human supervision?**
+   - **Answer**: *"We strictly adhere to a Human-in-the-Loop (HITL) pattern. When a ticket is submitted, the AI creates an `ai_draft_reply` saved in the database. It is never marked as final or visible to the employee until an authorized agent reviews it, makes necessary edits in the Agent Dashboard, and explicitly clicks 'Send Reply & Mark Resolved'."*
+
+

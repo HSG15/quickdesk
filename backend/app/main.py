@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import engine, get_db
 from app.models import Base  # Ensures all models are registered
-from app.api import auth
+from app.api import auth, tickets
 
 # Automatically create tables if they do not exist
 Base.metadata.create_all(bind=engine)
@@ -28,6 +28,7 @@ app.add_middleware(
 
 # Include API Routers
 app.include_router(auth.router)
+app.include_router(tickets.router)
 
 
 @app.get("/", tags=["System"])
