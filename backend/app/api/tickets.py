@@ -79,8 +79,12 @@ def create_ticket(
     # 1. Execute AI classification with safe fallback
     classification = classify_ticket(ticket_in.title, ticket_in.description)
 
-    # 2. Execute RAG retrieval against knowledge base
-    rag_result = generate_rag_reply(ticket_in.title, ticket_in.description)
+    # 2. Execute RAG retrieval against knowledge base with classified category context
+    rag_result = generate_rag_reply(
+        ticket_in.title,
+        ticket_in.description,
+        category=classification.category,
+    )
 
     ticket = Ticket(
         title=ticket_in.title.strip(),
@@ -122,7 +126,7 @@ def regenerate_draft_reply(
             detail="Ticket not found",
         )
 
-    rag_result = generate_rag_reply(ticket.title, ticket.description)
+    rag_result = generate_rag_reply(ticket.title, ticket.description, category=ticket.category)
     ticket.ai_draft_reply = rag_result["draft_reply"]
     ticket.citations_json = json.dumps(rag_result["citations"])
 

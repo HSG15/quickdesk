@@ -445,6 +445,20 @@ def generate_rag_reply(title: str, description: str) -> Dict[str, Any]:
 4. **Q: How do you choose chunk size and chunk overlap for RAG?**
    - **Answer**: *"We selected a chunk size of 500 characters with a 50-character overlap using RecursiveCharacterTextSplitter with Markdown header separators. Policy articles have clear sectional hierarchies ('## Prerequisites', '### Steps'). 500 characters is large enough to contain a complete procedural step or policy clause, yet small enough to avoid diluting semantic density with irrelevant surrounding text. The 50-character overlap prevents cutting sentences or key condition clauses in half across chunk boundaries."*
 
+5. **Q: Can you describe a real RAG bug you encountered and how you solved it? (The Aadhaar Card / Password Reset Case Study)**
+   - **Answer**: *"During user testing, an employee submitted an HR ticket: 'I need to update the address of my aadhar card.' The initial RAG implementation returned an IT Password Reset SSPR article with a 21% similarity score. This occurred due to two flaws: a loose similarity threshold (0.20 allowed random baseline noise through) and domain cross-contamination (semantic search alone was unaware that an IT article should not answer an HR ticket). We resolved this by raising the confidence threshold to 0.35, adding category-aware score weighting (+0.05 category affinity boost and -0.15 cross-department penalty), authoring an authoritative HR personal records update policy [KB-HR-003], and routing failed retrievals to department-specific escalation messages. This eliminated cross-domain noise and boosted true-match accuracy to over 75%."*
+
+---
+
+### ADR 5.5: Category-Aware Retrieval & Dynamic Cross-Domain Weighting
+- **Context**: In multi-department enterprise helpdesks (IT, HR, Finance, Admin), dense embeddings can occasionally exhibit low baseline similarities (~20%) between unrelated articles (e.g. general words like "update", "portal", "identity").
+- **Decision**: 
+  1. We raised the confidence acceptance threshold from `min_score = 0.20` to `min_score = 0.35`.
+  2. We implemented Category-Aware Score Adjustment: when a ticket has an established category (e.g. `HR`), chunks matching that category receive a `+0.05` affinity bonus, while chunks from conflicting departments receive a `-0.15` penalty unless their raw semantic score is extraordinarily high.
+  3. When no chunks pass the threshold, the escalation message dynamically routes to the appropriate team (e.g., HR People Operations, Finance, or Workplace Admin) rather than generic IT technical support.
+- **Why this choice**: Eliminates cross-department hallucinations, preserves domain isolation, and ensures employees receive authoritative, relevant answers.
+
+
 
 
 

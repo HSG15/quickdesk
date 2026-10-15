@@ -148,52 +148,87 @@ def index_knowledge_base() -> Dict[str, Any]:
     }
 
 
-def retrieve_relevant_chunks(query: str, top_k: int = 3, min_score: float = 0.25) -> List[Dict[str, Any]]:
+def retrieve_relevant_chunks(
+    query: str,
+    top_k: int = 3,
+    min_score: float = 0.35,
+    category: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Retrieves top-k relevant knowledge chunks for a query with similarity scores.
     Uses similarity_search_with_score (Euclidean/cosine distance) and maps distance
     to a normalized similarity score in [0.0, 1.0].
+    Applies category affinity boost (+0.05) and cross-department penalty (-0.15)
+    to prevent unrelated IT policies (e.g. password resets) from corrupting HR tickets.
     """
     vector_store = get_vector_store()
-    results = vector_store.similarity_search_with_score(query, k=top_k)
+    results = vector_store.similarity_search_with_score(query, k=top_k * 2)
 
-    relevant_chunks = []
+    scored_chunks = []
     for doc, distance in results:
         # Distance to normalized similarity score (for normalized embeddings)
         # In Chroma default (squared L2 distance where ||u-v||^2 = 2 - 2*cos(theta)),
-        # Cosine similarity = 1.0 - (distance / 2.0). Range is [0.0, 1.0] for non-negative similarity.
-        score = max(0.0, 1.0 - (float(distance) / 2.0))
-        if score >= min_score:
-            relevant_chunks.append({
+        # Cosine similarity = 1.0 - (distance / 2.0). Range is [0.0, 1.0].
+        raw_score = max(0.0, 1.0 - (float(distance) / 2.0))
+        doc_category = doc.metadata.get("category", "Other")
+
+        # Category-aware score weighting
+        adjusted_score = raw_score
+        if category and category.strip():
+            target_cat = category.strip().lower()
+            chunk_cat = doc_category.strip().lower()
+            if chunk_cat == target_cat:
+                adjusted_score = min(1.0, raw_score + 0.05)
+            else:
+                # Penalize cross-department mismatch
+                adjusted_score = max(0.0, raw_score - 0.15)
+
+        if adjusted_score >= min_score:
+            scored_chunks.append({
                 "content": doc.page_content,
                 "article_id": doc.metadata.get("article_id", "KB-UNKNOWN"),
                 "title": doc.metadata.get("title", "Unknown Article"),
-                "category": doc.metadata.get("category", "Other"),
+                "category": doc_category,
                 "source": doc.metadata.get("source", ""),
-                "score": float(score),
+                "score": float(adjusted_score),
             })
 
-    return relevant_chunks
+    # Sort descending by adjusted score and keep top_k
+    scored_chunks.sort(key=lambda x: x["score"], reverse=True)
+    return scored_chunks[:top_k]
 
 
-def generate_rag_reply(title: str, description: str) -> Dict[str, Any]:
+def generate_rag_reply(title: str, description: str, category: Optional[str] = None) -> Dict[str, Any]:
     """
     RAG Pipeline:
-    1. Retrieve relevant chunks from Chroma.
-    2. If no chunks pass threshold, generate safe escalation without inventing policy.
+    1. Retrieve relevant chunks from Chroma with category awareness.
+    2. If no chunks pass threshold (min_score=0.35), generate safe escalation without inventing policy.
     3. If chunks found, synthesize grounded draft citing real article metadata.
     """
     search_query = f"{title.strip()} {description.strip()}"
-    chunks = retrieve_relevant_chunks(search_query, top_k=3, min_score=0.20)
+    chunks = retrieve_relevant_chunks(search_query, top_k=3, min_score=0.35, category=category)
 
-    # Case A: Irrelevant query or empty knowledge base
+    # Case A: Irrelevant query or empty knowledge base -> Clean Departmental Escalation
     if not chunks:
-        logger.info(f"[RAG] No relevant articles found for query: '{title}'")
+        logger.info(f"[RAG] No relevant articles found for query: '{title}' (Category: {category})")
+        if category and category.upper() == "HR":
+            team_name = "our HR People Operations team"
+            contact_person = "An HR specialist"
+        elif category and category.upper() == "FINANCE":
+            team_name = "our Finance & Accounting team"
+            contact_person = "A finance specialist"
+        elif category and category.upper() == "ADMIN":
+            team_name = "our Workplace Administration team"
+            contact_person = "An administrative specialist"
+        else:
+            team_name = "our technical support team"
+            contact_person = "A technician"
+
         escalation_reply = (
             f"Thank you for contacting QuickDesk Support regarding '{title}'.\n\n"
-            "Our internal knowledge base does not contain sufficient documentation on this specific issue. "
-            "I have escalated your ticket to our senior technical support team for further investigation. "
-            "A technician will reach out directly with next steps."
+            f"Our internal knowledge base does not contain verified documentation on this specific request. "
+            f"I have escalated your ticket to {team_name} for manual review and guidance. "
+            f"{contact_person} will reach out directly with next steps."
         )
         return {
             "draft_reply": escalation_reply,

@@ -11,8 +11,8 @@ from app.services.rag_service import (
 def test_rag_indexing_and_retrieval():
     """Verify that knowledge base articles are chunked and indexed into Chroma."""
     result = index_knowledge_base()
-    assert result["articles_indexed"] == 7
-    assert result["chunks_indexed"] >= 20
+    assert result["articles_indexed"] == 8
+    assert result["chunks_indexed"] >= 25
 
     # Test retrieval for VPN query
     chunks = retrieve_relevant_chunks("VPN error 800 gateway unreachable", top_k=2)
@@ -20,12 +20,12 @@ def test_rag_indexing_and_retrieval():
     top_chunk = chunks[0]
     assert top_chunk["article_id"] == "KB-IT-001"
     assert "VPN" in top_chunk["title"]
-    assert top_chunk["score"] > 0.20
+    assert top_chunk["score"] > 0.30
 
 
 def test_rag_grounded_draft_with_citations():
     """Relevant query produces grounded draft with real citations from article metadata."""
-    res = generate_rag_reply("Password reset help", "How do I reset my SSO password and what are the complexity rules?")
+    res = generate_rag_reply("Password reset help", "How do I reset my SSO password and what are the complexity rules?", category="IT")
     assert res["grounded"] is True
     assert len(res["citations"]) >= 1
 
@@ -50,12 +50,27 @@ def test_rag_irrelevant_query_no_hallucination():
     Must return empty citations and a safe escalation notice.
     """
     irrelevant_query = "What is the recipe for chocolate chip brownies in the office kitchen microwave?"
-    res = generate_rag_reply("Kitchen recipe", irrelevant_query)
+    res = generate_rag_reply("Kitchen recipe", irrelevant_query, category="Other")
 
     assert res["grounded"] is False
     assert len(res["citations"]) == 0
-    assert "does not contain sufficient documentation" in res["draft_reply"].lower()
     assert "escalated" in res["draft_reply"].lower()
+
+
+def test_rag_aadhar_card_address_update_query():
+    """Aadhaar card address update retrieves KB-HR-003 and provides accurate HR guidance."""
+    res = generate_rag_reply(
+        "Aadhar Card address update",
+        "Dear HR, I need to update the address of my aadhar card in company records.",
+        category="HR",
+    )
+    assert res["grounded"] is True
+    assert len(res["citations"]) >= 1
+    citation_ids = [c["article_id"] for c in res["citations"]]
+    assert "KB-HR-003" in citation_ids
+    assert "KB-HR-003" in res["draft_reply"] or "hr.company.com/profile" in res["draft_reply"]
+    # Ensure IT password reset is NOT cited
+    assert "KB-IT-002" not in citation_ids
 
 
 def test_rag_finance_drive_query():
