@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
@@ -31,6 +32,9 @@ class Ticket(Base):
     ai_draft_reply = Column(Text, nullable=True)
     final_reply = Column(Text, nullable=True)
 
+    # Serialized citations list from RAG retrieval
+    citations_json = Column(Text, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
@@ -39,6 +43,15 @@ class Ticket(Base):
     # Relationships
     employee = relationship("User", back_populates="tickets")
     audit_logs = relationship("OverrideAuditLog", back_populates="ticket", cascade="all, delete-orphan", order_by="OverrideAuditLog.created_at.desc()")
+
+    @property
+    def citations(self):
+        if self.citations_json:
+            try:
+                return json.loads(self.citations_json)
+            except Exception:
+                return []
+        return []
 
     def __repr__(self) -> str:
         return f"<Ticket id={self.id} title='{self.title[:20]}' status='{self.status}'>"

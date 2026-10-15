@@ -18,6 +18,14 @@ export interface TicketEmployeeSummary {
   email: string
 }
 
+export interface TicketCitation {
+  article_id: string
+  title: string
+  source: string
+  category?: string
+  score?: number
+}
+
 export interface Ticket {
   id: number
   title: string
@@ -33,6 +41,7 @@ export interface Ticket {
   status: TicketStatus
   ai_draft_reply: string | null
   final_reply: string | null
+  citations?: TicketCitation[]
   created_at: string
   resolved_at: string | null
   updated_at: string

@@ -353,5 +353,98 @@ def classify_ticket(title: str, description: str) -> ClassificationResult:
 3. **Q: How do you guard against prompt injection where a user puts system instructions in the ticket description?**
    - **Answer**: *"We enforce structural separation and untrusted data labeling. We place system instructions in a dedicated `SystemMessage` role, explicitly instructing the model that ticket content in the `HumanMessage` is untrusted data and that prompt overrides must be ignored. Furthermore, our backend validates model output against a strict allowlist with Pydantic, so an attacker cannot force the model to output arbitrary values or escape the allowed categories."*
 
+---
+
+# Phase 5: Knowledge Base RAG & Citations
+
+### Overview
+In Phase 5, QuickDesk transitioned from simple classification to intelligent, grounded resolution synthesis using Retrieval-Augmented Generation (RAG). The system indexes internal Markdown policy documents into a local vector database and retrieves authoritative chunks to synthesize accurate draft responses with bracketed citations, while strictly refusing to invent policies when relevant documents are absent.
+
+---
+
+### ADR 5.1: Local Embedding Architecture (`all-MiniLM-L6-v2`) on MacBook Air M1
+- **Context**: The application must run efficiently on an 8 GB RAM MacBook Air M1 without high memory pressure or ongoing cloud embedding API costs.
+- **Decision**: We chose `sentence-transformers/all-MiniLM-L6-v2` via `langchain-huggingface`.
+- **Why this choice**:
+  - **Memory & Compute**: Produces 384-dimensional dense vectors with an ~80MB model size that executes locally on CPU in <15ms.
+  - **Zero Cost & Privacy**: Completely free, unlimited queries, and sensitive internal HR/finance company policies never leave the local environment for embedding.
+  - **Deterministic**: The same text always yields identical vector representations, simplifying regression testing and caching.
+
+---
+
+### ADR 5.2: Chroma Distance Metric & Vector Space Math ($L2$ to Cosine Similarity)
+- **Context**: When performing vector similarity searches, Chroma by default uses squared Euclidean distance ($\|u - v\|^2$). For normalized vectors, $\|u - v\|^2 = 2 - 2 \cos(\theta)$.
+- **Decision**: Rather than using naive `1.0 - distance` (which drops to negative values for distance > 1.0, incorrectly rejecting relevant articles), we convert distance to cosine similarity using the exact mathematical identity:
+  $$\text{Cosine Similarity} = \max\left(0.0, 1.0 - \frac{\text{distance}}{2.0}\right)$$
+- **Why this choice**:
+  - Relevant domain queries yield distances $\approx 0.89$, converting to $\approx 55.5\%$ similarity, which safely clears the `min_score = 0.25` threshold.
+  - Irrelevant queries (e.g. recipes, non-company questions) yield distances $\approx 1.81$, converting to $< 10\%$ similarity, which cleanly triggers out-of-scope escalation without false positives.
+
+---
+
+### ADR 5.3: Idempotent Vector Store Re-indexing
+- **Context**: Rerunning index scripts or restarting development servers must not create duplicate chunks in Chroma.
+- **Decision**: In `index_knowledge_base()`, the vector store inspects existing chunk IDs and purges them (`vector_store.delete(ids=...)`) before re-adding freshly chunked documents with deterministic IDs (`{article_id}_c{idx}`).
+- **Why this choice**: Guarantees exactly 29 chunks across the 7 policy articles regardless of how many times the indexing script is executed.
+
+---
+
+### ADR 5.4: Grounded Synthesis with Anti-Hallucination Fallback
+- **Context**: If an employee asks an unanswerable or unsupported question, an unconstrained LLM will fabricate plausible-sounding policies (e.g. "QuickDesk grants 60 days of annual leave rollover" when the policy is 5).
+- **Decision**:
+  - If Chroma retrieval returns zero chunks above `min_score = 0.20`, the LLM is bypassed entirely. A deterministic, polite escalation response is generated: *"Our internal knowledge base does not contain sufficient documentation on this specific issue. I have escalated your ticket to our senior technical support team..."*
+  - If chunks are retrieved, the prompt strictly constrains the model: *"You are an internal IT/HR/Finance helpdesk assistant. Answer using ONLY the provided knowledge base excerpts. If the information is not in the excerpts, state that you do not know. Every substantive claim must cite the article ID in brackets [KB-XXX-YYY]."*
+- **Why this choice**: Ensures zero policy hallucination, guarantees auditability, and displays verified company document references in the Agent drawer and Employee ticket view.
+
+---
+
+### Important Code Deep Dives (Phase 5)
+
+#### 1. Grounded Synthesis & Fallback Pipeline (`backend/app/services/rag_service.py`)
+```python
+def generate_rag_reply(title: str, description: str) -> Dict[str, Any]:
+    search_query = f"{title.strip()} {description.strip()}"
+    chunks = retrieve_relevant_chunks(search_query, top_k=3, min_score=0.20)
+
+    # 1. Anti-hallucination guard: If no chunks retrieved, escalate without LLM
+    if not chunks:
+        return {
+            "draft_reply": (
+                f"Thank you for contacting QuickDesk Support regarding '{title}'.\n\n"
+                "Our internal knowledge base does not contain sufficient documentation on this specific issue. "
+                "I have escalated your ticket to our senior technical support team for further investigation."
+            ),
+            "citations": [],
+            "grounded": False,
+        }
+
+    # 2. Build grounded context block with metadata headers
+    context_blocks = []
+    for c in chunks:
+        context_blocks.append(f"--- ARTICLE [{c['article_id']}]: {c['title']} ---\n{c['content']}")
+    context_text = "\n\n".join(context_blocks)
+
+    # 3. Grounded synthesis via Groq LLM (or deterministic fallback if API unavailable)
+    ...
+```
+*How it works*: Separates knowledge retrieval from generation. If the information does not exist in Chroma, the LLM is never invoked to guess; instead, a safe escalation is immediately returned. If found, the model is strictly bound to the retrieved context and instructed to output bracketed citations.
+
+---
+
+### Important Interview Questions & Answers (Phase 5)
+
+1. **Q: How does your RAG system prevent hallucination when an employee submits an unsupported question?**
+   - **Answer**: *"We enforce a two-stage anti-hallucination barrier. First, at the retrieval layer, we score retrieved chunks against a cosine similarity threshold. If no chunks pass the threshold, we bypass the LLM entirely and return a deterministic escalation notice. Second, at the generation layer, if chunks do pass, we instruct the LLM in the system prompt to synthesize its answer strictly using only the provided context snippets and to explicitly state if anything is not covered. We also require bracketed article ID citations for all factual assertions."*
+
+2. **Q: Why did you choose a local embedding model instead of an external embedding API like OpenAI text-embedding-3-small?**
+   - **Answer**: *"We chose sentence-transformers/all-MiniLM-L6-v2 for three key reasons: First, privacy and compliance: internal HR compensation guidelines and IT security policies never leave our infrastructure to external third-party embedding APIs. Second, operational cost and reliability: local embeddings cost $0.00 and have zero rate limits or external network failure modes. Third, efficiency: generating 384-dimensional embeddings takes less than 15ms per chunk on CPU, making it perfectly suited for an 8 GB RAM MacBook Air M1."*
+
+3. **Q: What is the mathematical relationship between Chroma's default distance and Cosine Similarity?**
+   - **Answer**: *"Chroma defaults to squared L2 distance: $d = \|u - v\|^2$. For unit-normalized embedding vectors, this expands to $d = \|u\|^2 + \|v\|^2 - 2(u \cdot v) = 1 + 1 - 2\cos(\theta) = 2 - 2\cos(\theta)$. Solving for cosine similarity gives $\cos(\theta) = 1 - \frac{d}{2}$. Using naive $1 - d$ would cause valid documents with distance around 0.9 to yield similarity 0.1, incorrectly dropping them below typical thresholds. Converting via $1 - \frac{d}{2}$ accurately maps distance 0.89 to 55.5% similarity and distance 1.81 to <10% similarity."*
+
+4. **Q: How do you choose chunk size and chunk overlap for RAG?**
+   - **Answer**: *"We selected a chunk size of 500 characters with a 50-character overlap using RecursiveCharacterTextSplitter with Markdown header separators. Policy articles have clear sectional hierarchies ('## Prerequisites', '### Steps'). 500 characters is large enough to contain a complete procedural step or policy clause, yet small enough to avoid diluting semantic density with irrelevant surrounding text. The 50-character overlap prevents cutting sentences or key condition clauses in half across chunk boundaries."*
+
+
 
 

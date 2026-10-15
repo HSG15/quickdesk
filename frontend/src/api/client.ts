@@ -102,6 +102,12 @@ export const api = {
     })
   },
 
+  regenerateDraftReply: async (id: number): Promise<Ticket> => {
+    return request<Ticket>(`/api/tickets/${id}/draft-reply`, {
+      method: 'POST',
+    })
+  },
+
   getAuditLogs: async (id: number): Promise<AuditLog[]> => {
     return request<AuditLog[]>(`/api/tickets/${id}/audit`)
   },

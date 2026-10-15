@@ -13,6 +13,7 @@ import {
   Check,
   ChevronRight,
   PlusCircle,
+  BookOpen,
 } from 'lucide-react'
 import { api, clearStoredToken, getStoredToken } from './api/client'
 import type { User, Ticket, AuditLog, TicketCategory, TicketPriority } from './types'
@@ -54,6 +55,7 @@ export default function App() {
   const [overrideLoading, setOverrideLoading] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [replyLoading, setReplyLoading] = useState(false)
+  const [regeneratingDraft, setRegeneratingDraft] = useState(false)
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null)
 
   // Load authenticated user on mount
@@ -218,6 +220,24 @@ export default function App() {
     }
   }
 
+  const handleRegenerateDraft = async () => {
+    if (!activeTicket) return
+    setRegeneratingDraft(true)
+    setActionSuccessMessage(null)
+    try {
+      const updated = await api.regenerateDraftReply(activeTicket.id)
+      setActiveTicket(updated)
+      setAgentTickets(agentTickets.map((t) => (t.id === updated.id ? updated : t)))
+      setReplyText(updated.ai_draft_reply || '')
+      setActionSuccessMessage('AI Draft regenerated from Knowledge Base context!')
+      setTimeout(() => setActionSuccessMessage(null), 3000)
+    } catch (err: unknown) {
+      if (err instanceof Error) alert(err.message)
+    } finally {
+      setRegeneratingDraft(false)
+    }
+  }
+
   // Priority badge styling
   const getPriorityBadge = (p: TicketPriority) => {
     switch (p) {
@@ -283,7 +303,7 @@ export default function App() {
             <div>
               <span className="font-semibold text-slate-900 text-lg tracking-tight">QuickDesk</span>
               <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Phase 3: Ticket Workflow
+                Phase 5: Knowledge Base RAG & Citations
               </span>
             </div>
           </div>
@@ -656,6 +676,23 @@ export default function App() {
                         <span>A support technician has been assigned and is reviewing your request.</span>
                       </div>
                     )}
+                    {selectedEmployeeTicket.citations && selectedEmployeeTicket.citations.length > 0 && (
+                      <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-lg space-y-1.5">
+                        <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-700">
+                          <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Related Company Policies & Documentation:</span>
+                        </div>
+                        <div className="space-y-1">
+                          {selectedEmployeeTicket.citations.map((c, idx) => (
+                            <div key={idx} className="text-[11px] flex items-center justify-between text-slate-600">
+                              <span className="font-medium">• {c.title}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{c.category}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                   </div>
 
                   <div className="pt-2 text-right">
@@ -971,15 +1008,83 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* Grounded Knowledge Base Citations */}
+                    {activeTicket.citations && activeTicket.citations.length > 0 && (
+                      <div className="bg-slate-50/70 p-3.5 rounded-xl border border-slate-200/80 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-800 uppercase tracking-wider">
+                            <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Knowledge Base Citations ({activeTicket.citations.length})</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">Chroma Vector DB</span>
+                        </div>
+                        <div className="space-y-2">
+                          {activeTicket.citations.map((c, idx) => (
+                            <div
+                              key={idx}
+                              className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs space-y-1 shadow-2xs"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-slate-900 flex items-center space-x-1">
+                                  <span>{c.title}</span>
+                                </span>
+                                <div className="flex items-center space-x-1.5">
+                                  {c.category && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 font-medium">
+                                      {c.category}
+                                    </span>
+                                  )}
+                                  {c.score !== undefined && (
+                                    <span className="text-[10px] font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                                      {Math.round(c.score * 100)}% match
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Document ID: <code className="text-slate-600">{c.article_id}</code> • file: {c.source}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* AI Draft & Final Reply Section */}
                     <div className="space-y-3 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                          AI-Assisted Resolution
+                        </span>
+                        {activeTicket.status !== 'Resolved' && (
+                          <button
+                            onClick={handleRegenerateDraft}
+                            disabled={regeneratingDraft}
+                            className="inline-flex items-center text-[11px] font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50 transition-colors cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3 h-3 mr-1 ${regeneratingDraft ? 'animate-spin' : ''}`} />
+                            <span>{regeneratingDraft ? 'Querying KB...' : 'Regenerate Draft'}</span>
+                          </button>
+                        )}
+                      </div>
+
                       {activeTicket.ai_draft_reply && (
                         <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded-lg text-xs text-indigo-900">
-                          <div className="flex items-center space-x-1 font-semibold text-indigo-800 mb-1">
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Initial AI Draft Reply:</span>
+                          <div className="flex items-center justify-between font-semibold text-indigo-800 mb-1">
+                            <div className="flex items-center space-x-1">
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Knowledge-Grounded Draft:</span>
+                            </div>
+                            {activeTicket.status !== 'Resolved' && (
+                              <button
+                                onClick={() => setReplyText(activeTicket.ai_draft_reply || '')}
+                                className="text-[10px] text-indigo-600 hover:underline font-normal cursor-pointer"
+                              >
+                                Copy to reply
+                              </button>
+                            )}
                           </div>
-                          <p className="italic text-indigo-800/80">{activeTicket.ai_draft_reply}</p>
+                          <p className="italic text-indigo-800/80 whitespace-pre-wrap">{activeTicket.ai_draft_reply}</p>
                         </div>
                       )}
 

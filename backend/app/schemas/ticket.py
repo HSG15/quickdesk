@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from pydantic import BaseModel, Field, ConfigDict
 
 TicketCategory = Literal["IT", "HR", "Finance", "Admin", "Other"]
@@ -24,6 +24,16 @@ class TicketEmployeeSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TicketCitation(BaseModel):
+    article_id: str
+    title: str
+    source: str
+    category: Optional[str] = None
+    score: Optional[float] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TicketResponse(BaseModel):
     id: int
     title: str
@@ -42,6 +52,7 @@ class TicketResponse(BaseModel):
     status: str
     ai_draft_reply: Optional[str] = None
     final_reply: Optional[str] = None
+    citations: List[TicketCitation] = []
 
     created_at: datetime
     resolved_at: Optional[datetime] = None

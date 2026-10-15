@@ -58,7 +58,9 @@ def _deterministic_placeholder_classifier(title: str, description: str):
     return category, priority, draft_reply
 
 
+import json
 from app.services.classifier import classify_ticket
+from app.services.rag_service import generate_rag_reply
 
 
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
@@ -71,16 +73,14 @@ def create_ticket(
     Create a new support ticket.
     - Derived employee_id comes exclusively from the authenticated user.
     - Applies initial AI classification (Groq LLM or deterministic fallback).
+    - Executes RAG knowledge retrieval and generates grounded draft reply with citations.
     - Stores immutable baselines for audit and evaluation metrics.
     """
-    # Execute AI classification with safe fallback
+    # 1. Execute AI classification with safe fallback
     classification = classify_ticket(ticket_in.title, ticket_in.description)
 
-    draft_reply = (
-        f"Thank you for contacting QuickDesk Support regarding '{ticket_in.title}'. "
-        f"Our team has categorized your ticket under {classification.category} ({classification.priority} priority). "
-        "A support technician is reviewing your request and will follow up shortly."
-    )
+    # 2. Execute RAG retrieval against knowledge base
+    rag_result = generate_rag_reply(ticket_in.title, ticket_in.description)
 
     ticket = Ticket(
         title=ticket_in.title.strip(),
@@ -95,11 +95,37 @@ def create_ticket(
         ai_suggested_priority=classification.priority,
         ai_suggestion_method=classification.method,
         status="Open",
-        ai_draft_reply=draft_reply,
+        ai_draft_reply=rag_result["draft_reply"],
+        citations_json=json.dumps(rag_result["citations"]),
         final_reply=None,
     )
 
     db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+@router.post("/{ticket_id}/draft-reply", response_model=TicketResponse)
+def regenerate_draft_reply(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_agent: User = Depends(require_agent),
+):
+    """
+    Agent-only endpoint to re-generate the RAG draft reply and citations against the knowledge base.
+    """
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    rag_result = generate_rag_reply(ticket.title, ticket.description)
+    ticket.ai_draft_reply = rag_result["draft_reply"]
+    ticket.citations_json = json.dumps(rag_result["citations"])
+
     db.commit()
     db.refresh(ticket)
     return ticket
