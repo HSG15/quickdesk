@@ -58,6 +58,9 @@ def _deterministic_placeholder_classifier(title: str, description: str):
     return category, priority, draft_reply
 
 
+from app.services.classifier import classify_ticket
+
+
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
 def create_ticket(
     ticket_in: TicketCreate,
@@ -67,11 +70,16 @@ def create_ticket(
     """
     Create a new support ticket.
     - Derived employee_id comes exclusively from the authenticated user.
-    - Applies initial AI classification and stores immutable baselines.
+    - Applies initial AI classification (Groq LLM or deterministic fallback).
+    - Stores immutable baselines for audit and evaluation metrics.
     """
-    # Generate initial category, priority, and draft reply
-    category, priority, draft_reply = _deterministic_placeholder_classifier(
-        ticket_in.title, ticket_in.description
+    # Execute AI classification with safe fallback
+    classification = classify_ticket(ticket_in.title, ticket_in.description)
+
+    draft_reply = (
+        f"Thank you for contacting QuickDesk Support regarding '{ticket_in.title}'. "
+        f"Our team has categorized your ticket under {classification.category} ({classification.priority} priority). "
+        "A support technician is reviewing your request and will follow up shortly."
     )
 
     ticket = Ticket(
@@ -80,12 +88,12 @@ def create_ticket(
         attachment_filename=ticket_in.attachment_filename.strip() if ticket_in.attachment_filename else None,
         employee_id=current_user.id,
         # Active values
-        category=category,
-        priority=priority,
+        category=classification.category,
+        priority=classification.priority,
         # Immutable AI baseline
-        ai_suggested_category=category,
-        ai_suggested_priority=priority,
-        ai_suggestion_method="rule_placeholder",
+        ai_suggested_category=classification.category,
+        ai_suggested_priority=classification.priority,
+        ai_suggestion_method=classification.method,
         status="Open",
         ai_draft_reply=draft_reply,
         final_reply=None,

@@ -246,6 +246,23 @@ export default function App() {
     }
   }
 
+  // Method badge styling (AI vs Rule Fallback)
+  const getMethodBadge = (m: string) => {
+    if (m === 'llm') {
+      return (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+          <Sparkles className="w-2.5 h-2.5 mr-1" />
+          AI (Groq)
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+        Rule Fallback
+      </span>
+    )
+  }
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -552,13 +569,14 @@ export default function App() {
                         </div>
 
                         <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-1.5">
                             <span className={`px-2 py-0.5 rounded border ${getCategoryBadge(t.category)}`}>
                               {t.category}
                             </span>
                             <span className={`px-2 py-0.5 rounded border ${getPriorityBadge(t.priority)}`}>
                               {t.priority}
                             </span>
+                            {getMethodBadge(t.ai_suggestion_method)}
                           </div>
                           <span className="text-slate-400 flex items-center">
                             <Clock className="w-3 h-3 mr-1" />
@@ -589,6 +607,7 @@ export default function App() {
                         >
                           {selectedEmployeeTicket.status}
                         </span>
+                        {getMethodBadge(selectedEmployeeTicket.ai_suggestion_method)}
                       </div>
                       <h3 className="text-base font-bold text-slate-900 mt-1">{selectedEmployeeTicket.title}</h3>
                     </div>
@@ -783,9 +802,12 @@ export default function App() {
                                 <p className="text-[11px] text-slate-400">Employee #{t.employee_id}</p>
                               </td>
                               <td className="py-3 px-3">
-                                <span className={`px-2 py-0.5 rounded border text-[11px] ${getCategoryBadge(t.category)}`}>
-                                  {t.category}
-                                </span>
+                                <div className="flex items-center space-x-1">
+                                  <span className={`px-2 py-0.5 rounded border text-[11px] ${getCategoryBadge(t.category)}`}>
+                                    {t.category}
+                                  </span>
+                                  {getMethodBadge(t.ai_suggestion_method)}
+                                </div>
                               </td>
                               <td className="py-3 px-3">
                                 <span className={`px-2 py-0.5 rounded border text-[11px] ${getPriorityBadge(t.priority)}`}>
@@ -871,9 +893,11 @@ export default function App() {
                         <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                           Classification & Overrides
                         </h4>
-                        <span className="text-[11px] text-slate-500">
-                          Original AI Suggestion: <strong>{activeTicket.ai_suggested_category}</strong> (
-                          {activeTicket.ai_suggested_priority})
+                        <span className="text-[11px] text-slate-500 flex items-center space-x-1.5">
+                          <span>
+                            Baseline: <strong>{activeTicket.ai_suggested_category}</strong> ({activeTicket.ai_suggested_priority})
+                          </span>
+                          {getMethodBadge(activeTicket.ai_suggestion_method)}
                         </span>
                       </div>
 
