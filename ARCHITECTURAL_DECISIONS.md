@@ -90,3 +90,92 @@ This living document records the key architectural, technical, and engineering d
 - **Context**: The application must look professional, intentional, and readable for enterprise internal users (support agents and employees).
 - **Decision**: Built with React, Vite, TypeScript, and Tailwind CSS using a neutral slate/zinc surface palette, clear contrast, restrained indigo/blue accents, and accessible typography (Inter).
 - **Why this choice**: Avoids generic unstyled appearance or garish gradients. Focuses on clarity, clear status badges (Open vs. Resolved), and distinct priority indicators (Low, Medium, High).
+
+---
+
+## Phase 2: Database Models, Migrations, Seed Data & RBAC Authentication
+
+### ADR 2.1: Native bcrypt Hashing over Legacy Passlib
+- **Context**: Passlib has historically been standard in FastAPI tutorials, but it relies on Python's legacy `crypt` module which is deprecated in Python 3.11+ and completely removed in Python 3.13.
+- **Decision**: Use the modern, maintained `bcrypt` package directly (`bcrypt.hashpw` and `bcrypt.checkpw`) with automatic random salt generation.
+- **Why this choice**: 
+  - Zero deprecation warnings on modern Python 3.13 runtime.
+  - Constant-time password verification prevents side-channel timing attacks.
+  - Generates secure, salted modular crypt format strings (`$2b$12$...`).
+- **Interview Talking Point**: *"Rather than relying on passlib—which triggers deprecation warnings in Python 3.13 due to the removal of the standard library `crypt` module—we integrated the native `bcrypt` C-extension directly. This ensures forward compatibility, faster hashing, and timing-attack resistant password verification."*
+
+---
+
+### ADR 2.2: Stateless JWT Bearer Authentication
+- **Context**: The client must authenticate requests to both REST endpoints and Server-Sent Event (SSE) streams across independent HTTP requests.
+- **Decision**: Issue signed HMAC-SHA256 (HS256) JSON Web Tokens (JWT) upon successful login, including `sub` (user_id), `email`, and `role`.
+- **Why this choice**:
+  - Statelessness: The server does not need to maintain server-side session tables in memory or Redis for authentication verification.
+  - Fast decoding: Verification only requires cryptographically validating the signature with `JWT_SECRET_KEY` and checking expiration.
+  - Decoupled authorization: The user's role is embedded in the verified claims, enabling immediate role inspection before querying the database.
+- **Security Considerations & Trade-offs**:
+  - Storing JWTs in browser memory or `localStorage` carries an XSS risk if client-side code is compromised.
+  - Mitigation: In production, tokens should be transmitted in `HttpOnly`, `SameSite=Strict` secure cookies to prevent JavaScript read access. For our internal assessment API client, we use Authorization Bearer headers with strict backend validation.
+
+---
+
+### ADR 2.3: Declarative Role Enforcement via FastAPI Dependency Injection
+- **Context**: Support agents must perform administrative actions (viewing all tickets, overriding AI classifications, replying, viewing metrics) that employees must NEVER be able to perform. Hiding buttons in the frontend is insufficient.
+- **Decision**: Enforce authorization strictly on the server using composable FastAPI dependencies:
+  - `get_current_user`: extracts Bearer token, validates signature/expiration, fetches user from database. Returns `HTTP 401 Unauthorized` if invalid.
+  - `require_agent`: consumes `get_current_user` and verifies `current_user.role == "agent"`. Returns `HTTP 403 Forbidden` if user is an employee.
+  - `require_employee`: consumes `get_current_user` and verifies `current_user.role == "employee"`.
+- **Why this choice**:
+  - Declarative route decoration: `@router.get("/metrics", dependencies=[Depends(require_agent)])`. A developer cannot accidentally forget the authorization check inside the route function.
+  - Clean separation between *authentication* (who are you? -> 401) and *authorization* (what are you allowed to do? -> 403).
+
+---
+
+### ADR 2.4: Schema Design — Immutable AI Baselines vs Active Ticket State
+- **Context**: The application requires tracking AI accuracy and agent overrides over time.
+- **Decision**: In `models/ticket.py`, we separate:
+  1. `ai_suggested_category` and `ai_suggested_priority` (set at ticket creation, never updated).
+  2. `category` and `priority` (active values, initially equal to AI suggestion, but updatable by agents).
+  3. `override_audit_logs` table (atomic audit record of ticket_id, agent_id, field_name, old_value, new_value, created_at).
+- **Why this choice**:
+  - Maintains historical ground truth for model evaluation and audit logs.
+  - Enables calculating exact override rates: $\frac{\text{Tickets where active category} \ne \text{AI suggested category}}{\text{Total tickets with AI suggestions}} \times 100$.
+
+---
+
+### Important Code Deep Dives (Phase 2)
+
+#### 1. RBAC Guard Dependency (`backend/app/api/deps.py`)
+```python
+def require_agent(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "agent":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Support Agent role required",
+        )
+    return current_user
+```
+*How it works*: FastAPI's dependency injection resolves `get_current_user` first. If the token is missing or expired, it immediately halts with a `401`. If valid, it inspects the database-backed `current_user.role`. If not `"agent"`, it aborts with `403 Forbidden`. The protected route handler never even executes.
+
+#### 2. Salted bcrypt Hashing (`backend/app/core/security.py`)
+```python
+def get_password_hash(password: str) -> str:
+    password_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password_bytes, salt).decode("utf-8")
+```
+*How it works*: `bcrypt.gensalt()` generates a cryptographically random 128-bit salt with default cost factor 12 ($2^{12} = 4,096$ iterations). Even if two users choose the identical password `"password123"`, their hashes will be completely different, protecting against pre-computed rainbow table attacks.
+
+---
+
+### Important Interview Questions & Answers (Phase 2)
+
+1. **Q: What is the difference between HTTP 401 Unauthorized and HTTP 403 Forbidden in your API?**
+   - **Answer**: *"HTTP 401 means unauthenticated: the client failed to provide a valid JWT token, or the token expired. The client can retry by logging in. HTTP 403 means authenticated but unauthorized: we know who the user is (e.g., an employee), but their role lacks permission to execute the requested action (e.g., an agent-only override or metrics endpoint). Re-authenticating with the same user will not grant access."*
+
+2. **Q: Why don't you trust the user ID or role sent in the request body from the client?**
+   - **Answer**: *"A client can manipulate any headers or JSON bodies sent over the wire. We derive the user's identity and role exclusively from the cryptographically verified JWT payload (`sub` claim) signed with our server secret. Furthermore, our dependency verifies that the user ID actually exists in PostgreSQL to guard against tokens issued before an account was deleted."*
+
+3. **Q: How does your database prevent duplicate users or tickets with non-existent employees?**
+   - **Answer**: *"We enforce relational integrity at the PostgreSQL engine level. `users.email` has a `UNIQUE` index constraint. `tickets.employee_id` has a `FOREIGN KEY` constraint referencing `users.id` with `ON DELETE CASCADE`. If someone attempts to insert a ticket with a fictitious employee ID, PostgreSQL immediately raises an integrity violation error, preventing orphaned or corrupt records."*
+

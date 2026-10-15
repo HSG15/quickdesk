@@ -4,7 +4,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.session import engine, get_db
+from app.models import Base  # Ensures all models are registered
+from app.api import auth
+
+# Automatically create tables if they do not exist
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="QuickDesk API",
@@ -20,6 +25,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include API Routers
+app.include_router(auth.router)
 
 
 @app.get("/", tags=["System"])
