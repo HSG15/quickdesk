@@ -5,7 +5,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.api.deps import get_current_user, require_agent, require_agent_from_token_or_query
+from app.api.deps import (
+    get_current_user,
+    require_agent,
+    require_agent_from_token_or_query,
+    get_current_user_from_token_or_query,
+)
 from app.db.session import get_db
 from app.models.user import User
 from app.models.ticket import Ticket
@@ -204,11 +209,11 @@ def get_all_tickets_agent(
 
 @router.get("/events")
 async def ticket_event_stream(
-    current_agent: User = Depends(require_agent_from_token_or_query),
+    current_user: User = Depends(get_current_user_from_token_or_query),
 ):
     """
     Server-Sent Events (SSE) stream for real-time ticket activity.
-    Pushes 'ticket_created', 'ticket_updated', and 'ticket_resolved' to active support agents.
+    Pushes 'ticket_created', 'ticket_updated', and 'ticket_resolved' to active support agents and employees.
     """
     return StreamingResponse(
         broadcaster.subscribe(),

@@ -32,17 +32,37 @@ def test_metrics_forbidden_for_employee(client):
     assert resp.status_code == 403
 
 
+from app.db.session import SessionLocal
+from app.api.deps import get_current_user_from_token_or_query
+
+
 def test_sse_endpoint_auth_protection(client):
-    """SSE endpoint requires valid agent token (header or ?token= query param)."""
+    """SSE endpoint requires valid token (header or ?token= query param). Both agents and employees can connect."""
     # 1. No token -> 401
     resp = client.get("/api/tickets/events")
     assert resp.status_code == 401
 
-    # 2. Employee token -> 403
+    # 2. Invalid token -> 401
+    resp = client.get("/api/tickets/events?token=invalid.token.here")
+    assert resp.status_code == 401
+
+    # 3. Valid employee token -> verifies get_current_user_from_token_or_query accepts employee
     emp_resp = client.post("/api/auth/login", json={"email": "employee@quickdesk.com", "password": "employee123"})
     emp_token = emp_resp.json()["access_token"]
-    resp = client.get(f"/api/tickets/events?token={emp_token}")
-    assert resp.status_code == 403
+    db = SessionLocal()
+    try:
+        emp_user = get_current_user_from_token_or_query(credentials=None, token=emp_token, db=db)
+        assert emp_user.role == "employee"
+        assert emp_user.email == "employee@quickdesk.com"
+
+        # 4. Valid agent token -> verifies get_current_user_from_token_or_query accepts agent
+        agent_resp = client.post("/api/auth/login", json={"email": "agent@quickdesk.com", "password": "agent123"})
+        agent_token = agent_resp.json()["access_token"]
+        agent_user = get_current_user_from_token_or_query(credentials=None, token=agent_token, db=db)
+        assert agent_user.role == "agent"
+        assert agent_user.email == "agent@quickdesk.com"
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio

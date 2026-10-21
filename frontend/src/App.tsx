@@ -156,11 +156,13 @@ export default function App() {
     }
   }
 
-  // Phase 6: Server-Sent Events (SSE) listener for real-time ticket push
+  // Real-time Server-Sent Events (SSE) listener for both agents and employees
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'agent') return
+    if (!currentUser) return
 
-    loadMetrics()
+    if (currentUser.role === 'agent') {
+      loadMetrics()
+    }
 
     const token = getStoredToken()
     if (!token) return
@@ -174,13 +176,20 @@ export default function App() {
     eventSource.addEventListener('ticket_created', (e) => {
       try {
         const newTicket: Ticket = JSON.parse(e.data)
-        setAgentTickets((prev) => {
-          if (prev.some((t) => t.id === newTicket.id)) return prev
-          return [newTicket, ...prev]
-        })
-        setNewTicketToast(`🔔 New Ticket #${newTicket.id} received: "${newTicket.title}"`)
-        playNotificationChime()
-        loadMetrics()
+        if (currentUser.role === 'agent') {
+          setAgentTickets((prev) => {
+            if (prev.some((t) => t.id === newTicket.id)) return prev
+            return [newTicket, ...prev]
+          })
+          setNewTicketToast(`🔔 New Ticket #${newTicket.id} received: "${newTicket.title}"`)
+          playNotificationChime()
+          loadMetrics()
+        } else if (currentUser.role === 'employee' && newTicket.employee_id === currentUser.id) {
+          setEmployeeTickets((prev) => {
+            if (prev.some((t) => t.id === newTicket.id)) return prev
+            return [newTicket, ...prev]
+          })
+        }
       } catch (err) {
         console.error('Error handling ticket_created SSE:', err)
       }
@@ -189,9 +198,14 @@ export default function App() {
     eventSource.addEventListener('ticket_updated', (e) => {
       try {
         const updated: Ticket = JSON.parse(e.data)
-        setAgentTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-        setActiveTicket((curr) => (curr && curr.id === updated.id ? updated : curr))
-        loadMetrics()
+        if (currentUser.role === 'agent') {
+          setAgentTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+          setActiveTicket((curr) => (curr && curr.id === updated.id ? updated : curr))
+          loadMetrics()
+        } else if (currentUser.role === 'employee' && updated.employee_id === currentUser.id) {
+          setEmployeeTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+          setSelectedEmployeeTicket((curr) => (curr && curr.id === updated.id ? updated : curr))
+        }
       } catch (err) {
         console.error('Error handling ticket_updated SSE:', err)
       }
@@ -200,9 +214,16 @@ export default function App() {
     eventSource.addEventListener('ticket_resolved', (e) => {
       try {
         const resolved: Ticket = JSON.parse(e.data)
-        setAgentTickets((prev) => prev.map((t) => (t.id === resolved.id ? resolved : t)))
-        setActiveTicket((curr) => (curr && curr.id === resolved.id ? resolved : curr))
-        loadMetrics()
+        if (currentUser.role === 'agent') {
+          setAgentTickets((prev) => prev.map((t) => (t.id === resolved.id ? resolved : t)))
+          setActiveTicket((curr) => (curr && curr.id === resolved.id ? resolved : curr))
+          loadMetrics()
+        } else if (currentUser.role === 'employee' && resolved.employee_id === currentUser.id) {
+          setEmployeeTickets((prev) => prev.map((t) => (t.id === resolved.id ? resolved : t)))
+          setSelectedEmployeeTicket((curr) => (curr && curr.id === resolved.id ? resolved : curr))
+          setNewTicketToast(`🎉 Your Ticket #${resolved.id} ("${resolved.title}") was resolved by support!`)
+          playNotificationChime()
+        }
       } catch (err) {
         console.error('Error handling ticket_resolved SSE:', err)
       }
@@ -418,8 +439,9 @@ export default function App() {
             </div>
             <div>
               <span className="font-semibold text-slate-900 text-lg tracking-tight">QuickDesk</span>
-              <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Phase 6: Real-time SSE & Agent Metrics
+              <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center space-x-1 inline-flex">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>AI-Assisted Helpdesk • Production</span>
               </span>
             </div>
           </div>
@@ -666,9 +688,25 @@ export default function App() {
                     <FileText className="w-5 h-5 text-indigo-600" />
                     <h2 className="text-base font-semibold text-slate-900">My Submitted Tickets</h2>
                   </div>
-                  <span className="text-xs text-slate-500">
-                    Total: <strong>{employeeTickets.length}</strong>
-                  </span>
+                  <div className="flex items-center space-x-3">
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${
+                        sseConnected
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+                          sseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                        }`}
+                      />
+                      <span>{sseConnected ? 'Live Sync Active' : 'Connecting...'}</span>
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      Total: <strong>{employeeTickets.length}</strong>
+                    </span>
+                  </div>
                 </div>
 
                 {employeeTickets.length === 0 ? (

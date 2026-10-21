@@ -558,6 +558,10 @@ class EventBroadcaster:
 4. **Q: Why must static routes like `/metrics` and `/events` be defined before parameterized routes like `/{ticket_id}` in FastAPI?**
    - **Answer**: *"FastAPI matches routes in the exact order they are declared on the router. If `/{ticket_id}` (where `ticket_id: int`) is declared before `/metrics`, a request to `/metrics` will match `/{ticket_id}` with `ticket_id='metrics'`. FastAPI attempts to parse the string `'metrics'` as an integer, fails validation, and immediately returns HTTP 422 Unprocessable Entity. Static sub-resource paths must always precede dynamic path variables."*
 
+5. **Q: How does QuickDesk deliver real-time ticket lifecycle updates to employees when agents resolve tickets?**
+   - **Answer**: *"QuickDesk uses unified Server-Sent Events (SSE) authenticated via `get_current_user_from_token_or_query` for both support agents and employees. When an agent replies to and resolves a ticket (`POST /api/tickets/{id}/reply`), the backend commits the transaction and immediately broadcasts a `ticket_resolved` event containing the complete serialized Ticket DTO across all active subscriber queues. On the employee client side, the React application filters incoming SSE payloads matching `event.data.employee_id === currentUser.id`. It atomically transitions the ticket state to 'Resolved', updates any open ticket inspection modal with the agent's resolution text and citations, sounds an audio notification chime, and renders a non-intrusive floating toast—all without requiring a manual page refresh."*
+
+
 
 
 
