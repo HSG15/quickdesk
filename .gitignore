@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pdf
 .Python
 env/
 build/
@@ -54,3 +55,8 @@ yarn-error.log*
 .idea/
 *.swp
 *.swo
+
+# Study & Revision Notes
+QnA/
+Personal/
+

@@ -87,21 +87,25 @@ def index_knowledge_base() -> Dict[str, Any]:
     if not KB_DIR.exists():
         raise FileNotFoundError(f"Knowledge base directory not found at {KB_DIR}")
 
+    # read all md files from knowledge_base directory
     md_files = list(KB_DIR.glob("*.md"))
     if not md_files:
         logger.warning(f"[RAG] No markdown files found in {KB_DIR}")
         return {"articles_indexed": 0, "chunks_indexed": 0, "article_titles": []}
 
+    # split md files into chunks to maintain context length of LLM
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=50,
         separators=["\n## ", "\n### ", "\n\n", "\n", " "],
     )
 
+    # create documents list with chunk ids and metadata from md files
     documents: List[Document] = []
     chunk_ids: List[str] = []
     indexed_titles: List[str] = []
 
+    # iterate over md files and create documents with metadata and chunk ids
     for file_path in md_files:
         with open(file_path, "r", encoding="utf-8") as f:
             raw_text = f.read()

@@ -80,4 +80,3 @@ class TicketMetricsResponse(BaseModel):
     category_distribution: dict[str, int]
     priority_distribution: dict[str, int]
     ai_method_distribution: dict[str, int]
-

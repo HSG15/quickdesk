@@ -14,7 +14,8 @@ class EventBroadcaster:
     """
 
     def __init__(self):
-        self._subscribers: Set[asyncio.Queue] = set()
+        # _subscribers is a collection of queues, with one queue for each connected subscriber.
+        self._subscribers: Set[asyncio.Queue] = set() 
         self._lock = asyncio.Lock()
 
     async def subscribe(self) -> AsyncGenerator[str, None]:
