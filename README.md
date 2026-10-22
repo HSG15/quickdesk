@@ -148,6 +148,56 @@ All authenticated endpoints require `Authorization: Bearer <token>` header (or `
 * **Decision**: If Employee Bob attempts to view Employee Charlie's ticket via `GET /api/tickets/{charlie_id}`, the server returns `HTTP 404 Not Found` instead of `HTTP 403 Forbidden`.
 * **Tradeoff**: Returning 403 reveals that a ticket actually exists at that ID, allowing an attacker to try sequential IDs and estimate company ticket volume. Returning 404 neutralizes horizontal ID scanning completely.
 
+### 6. Frontend Framework Choice (React SPA with Vite vs. Next.js)
+* **Decision**: We chose React 19 with Vite instead of Next.js.
+* **Why**: Our FastAPI backend already handles the server-side work, so React can focus on the user interface and vite provides a simple and fast development experience and Next.js would have added unnecessary Node.js server runtime complexity
+
+### 7. RAG Pipeline Structure: Chunks, Embeddings, Retriever & Prompt
+* **Chunk Size**: We used LangChain's `RecursiveCharacterTextSplitter` with 500 characters chunk size and 50 characters overlap. 
+* **Embedding Model**: `sentence-transformers/all-MiniLM-L6-v2` running locally on CPU. It generates 384-dimensional dense vectors in under 15ms per query with zero cloud costs.
+* **Retriever & Scoring**: We query top-3 chunks from ChromaDB. Chroma returns squared Euclidean distance ($d$), so we convert it to Cosine Similarity using $\cos(\theta) = 1.0 - (d / 2.0)$. We apply a `+0.05` affinity boost if the article category matches the ticket category, and a `-0.15` penalty for mismatches. If the top score is below `0.35`, the system refuses to answer and escalates to a human agent with 0 citations to prevent hallucinating policy.
+* **Prompt**: The system prompt forces the LLM to answer strictly using the provided context chunks and cite them with bracketed IDs (e.g. `[KB-IT-001]`). If the context doesn't contain the answer, it is instructed to explicitly say it cannot help rather than guessing.
+
+### 8. Handling Out-of-Bounds / Invalid LLM Categories
+* **Decision**: We have defined a strict Python set of allowed categories, i.e., `{"IT", "HR", "Finance", "Admin", "Other"}`.
+* **How it's handled**: In `classifier.py`, after parsing the JSON from Groq, we check if `category in ALLOWED_CATEGORIES`. If the LLM returns an invalid or some other category (like "Hardware" or "Issues related to Payroll"), the validation rejects it and either diverts to our deterministic keyword regex classifier or safely assigns `"Other"`.
+
+### 9. Client-Side JWT Storage (LocalStorage vs. HttpOnly Cookies)
+* **Decision**: We stored the JWT in the browser's `localStorage` under `quickdesk_token`.
+
+* **Why?**: It was simple to use with our React frontend and FastAPI backend. Our API client can easily attach the token to API requests. We also use it for SSE connections to receive live updates.
+
+* **Trade-off**: JavaScript can access `localStorage`, so if an attacker finds an XSS vulnerability, they could steal the token. An `HttpOnly` cookie is safer because JavaScript cannot read it.
+
+For this project, we chose `localStorage` to keep authentication simple. For a production application, I would rather consider `HttpOnly` cookies.
+
+### 10. Backend RBAC Enforcement & Stopping URL Guessing
+* **Decision**: We never rely on the frontend UI. Every sensitive endpoint has a backend dependency guard: `Depends(require_agent)`.
+* **What stops employees from guessing agent URLs**: Even if an employee guesses an agent-only URL or edits their React state in browser DevTools, the backend checks their JWT and verifies their role. If the role is not an agent, they are immediately returned `HTTP 403 Forbidden`. The request is blocked before touching any database logic.
+
+### 11. Real-Time Streaming & Mid-Session Disconnect Handling
+* **Choice**: We chose Server-Sent Events (SSE) because our app only needs the server to send updates to the browser. It uses normal HTTP and works well with corporate proxies, so we don't need the extra complexity of WebSockets.
+* **Failure Mode on Disconnect**: If an agent's Wi-Fi drops or their laptop sleeps mid-session:
+  1. The browser's native `EventSource` automatically tries to reconnect every 3–5 seconds without needing extra custom code.
+  2. FastAPI detects the disconnected client and cleans up its queue to avoid wasting memory.
+  3. Limitation: Any events missed during the disconnection may be lost because they are stored in memory. When the client reconnects, the frontend fetches the latest ticket list to get back in sync.
+
+### 12. Worst Failure Mode in the System Today & How to Fix It
+* **The Worst Failure Mode**: Our real-time notification system stores connected agents in the backend's memory. If the backend restarts, all connections are lost. Also, if we run multiple backend containers, an agent connected to one container may miss events sent by another container.
+* **How to Fix It**: Use Redis Pub/Sub as a shared messaging system. Whenever a ticket is created or updated, the backend publishes an event to Redis. All backend containers receive that event and send it to their connected agents.
+
+### 13. Where AI Tools Helped Most vs. Where They Misled Me
+* **Where AI Helped Most**:
+  - Generate basic backend code, database models, and data validation.
+  - Build the frontend layout and notification sound.
+  - Write automated tests to check whether the application works correctly.
+  - Debugging and troubleshooting complex issues.
+  
+* **Where AI Misled / Hurt**:
+  - **Wrong similarity calculation in RAG**: AI suggested an incorrect formula for comparing documents. This caused some relevant documents to be ignored. I researched the distance calculation and corrected the formula.
+  - **Unavailable AI model**: AI suggested a Groq model that returned a 404 Not Found error. I checked which models were available and switched to `openai/gpt-oss-120b`.   
+  - **Incorrect API route order**: AI placed a dynamic route before fixed routes in FastAPI. As a result, requests such as /metrics were treated as ticket IDs and threw 422 errors. Moving the fixed routes above the dynamic route solved the issue.
+
 ---
 
 ## What I Would Do With More Time
@@ -164,16 +214,16 @@ Build a cascading LLM router:
 * **Tier 2**: Secondary cloud provider fallback (Anthropic Claude 3.5 Sonnet / OpenAI GPT-4o-mini) if Tier 1 times out or hits rate limits.
 * **Tier 3**: Local deterministic keyword heuristics if all cloud networks are unreachable.
 
-### 4. Smart FAQ(Similar Questions)
+### 4. Smart FAQ & Ticket Deflection (Similar Questions)
 Track frequently asked questions and resolved tickets. When an employee starts typing their ticket title or description, perform instant semantic search to suggest relevant answers right away. If an existing solution resolves their issue, they won't even need to submit a ticket.
 
 ### 5. AI Feedback & Rating Loop
 Add a thumbs up/down and rating mechanism for AI-drafted replies. Support agents and employees can rate how helpful the suggestion was, generating data to evaluate prompt quality and fine-tune future model drafts.
 
-### 7. Ticket Archiving & Retention (Trash Bin / Year-Wise)
+### 6. Ticket Archiving & Retention (Trash Bin / Year-Wise)
 Add a soft-delete trash bin and an automated retention policy that archives resolved tickets older than 1–2 years into year-wise cold storage. This keeps the active database lean and queries fast while preserving compliance records.
 
-### 8. SLA Deadlines & Escalation Alerts
+### 7. SLA Deadlines & Escalation Alerts
 Set target resolution times based on ticket priority (e.g., High-priority tickets must be resolved within 4 hours). Include a live countdown timer and send automated push notifications to agents when a ticket is approaching or breaching its SLA deadline.
 
 ---
