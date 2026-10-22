@@ -167,15 +167,16 @@ def test_agent_override_audit_lifecycle(client, auth_tokens):
     ticket_id = res.json()["id"]
     orig_ai_cat = res.json()["ai_suggested_category"]
 
-    # Agent overrides category to Finance
+    # Agent overrides category to a different category
+    new_cat = "HR" if orig_ai_cat == "Finance" else "Finance"
     override_res = client.patch(
         f"/api/tickets/{ticket_id}/classification",
-        json={"category": "Finance"},
+        json={"category": new_cat},
         headers={"Authorization": f"Bearer {auth_tokens['agent']}"},
     )
     assert override_res.status_code == 200
     updated_ticket = override_res.json()
-    assert updated_ticket["category"] == "Finance"
+    assert updated_ticket["category"] == new_cat
     # Baseline unchanged!
     assert updated_ticket["ai_suggested_category"] == orig_ai_cat
 
@@ -189,7 +190,7 @@ def test_agent_override_audit_lifecycle(client, auth_tokens):
     assert len(logs) == 1
     assert logs[0]["field_name"] == "category"
     assert logs[0]["old_value"] == orig_ai_cat
-    assert logs[0]["new_value"] == "Finance"
+    assert logs[0]["new_value"] == new_cat
 
 
 def test_override_with_same_value_does_not_create_audit(client, auth_tokens):

@@ -25,25 +25,39 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(endpoint, {
-    ...options,
-    headers,
-  })
+  // 20-second client-side timeout to prevent infinite UI button loops
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 20000)
 
-  if (!response.ok) {
-    let errorDetail = `Request failed with HTTP ${response.status}`
-    try {
-      const errorJson = await response.json()
-      if (errorJson.detail) {
-        errorDetail = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail)
+  try {
+    const response = await fetch(endpoint, {
+      ...options,
+      headers,
+      signal: options.signal || controller.signal,
+    })
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      let errorDetail = `Request failed with HTTP ${response.status}`
+      try {
+        const errorJson = await response.json()
+        if (errorJson.detail) {
+          errorDetail = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail)
+        }
+      } catch {
+        // Ignore JSON parse errors
       }
-    } catch {
-      // Ignore JSON parse errors
+      throw new Error(errorDetail)
     }
-    throw new Error(errorDetail)
-  }
 
-  return response.json() as Promise<T>
+    return response.json() as Promise<T>
+  } catch (error: any) {
+    clearTimeout(timeoutId)
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out after 20 seconds. Please try again.')
+    }
+    throw error
+  }
 }
 
 export const api = {

@@ -4,6 +4,11 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+# Prevent HuggingFace Hub network checks and threadpool deadlocks
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings

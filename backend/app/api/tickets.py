@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -66,13 +66,14 @@ def _deterministic_placeholder_classifier(title: str, description: str):
     return category, priority, draft_reply
 
 
+import asyncio
 import json
 from app.services.classifier import classify_ticket
 from app.services.rag_service import generate_rag_reply
 
 
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
-def create_ticket(
+async def create_ticket(
     ticket_in: TicketCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -85,13 +86,14 @@ def create_ticket(
     - Stores immutable baselines for audit and evaluation metrics.
     """
     # 1. Execute AI classification with safe fallback
-    classification = classify_ticket(ticket_in.title, ticket_in.description)
+    classification = await asyncio.to_thread(classify_ticket, ticket_in.title, ticket_in.description)
 
     # 2. Execute RAG retrieval against knowledge base with classified category context
-    rag_result = generate_rag_reply(
+    rag_result = await asyncio.to_thread(
+        generate_rag_reply,
         ticket_in.title,
         ticket_in.description,
-        category=classification.category,
+        classification.category,
     )
 
     ticket = Ticket(
@@ -209,6 +211,7 @@ def get_all_tickets_agent(
 
 @router.get("/events")
 async def ticket_event_stream(
+    request: Request,
     current_user: User = Depends(get_current_user_from_token_or_query),
 ):
     """
@@ -216,7 +219,7 @@ async def ticket_event_stream(
     Pushes 'ticket_created', 'ticket_updated', and 'ticket_resolved' to active support agents and employees.
     """
     return StreamingResponse(
-        broadcaster.subscribe(),
+        broadcaster.subscribe(request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

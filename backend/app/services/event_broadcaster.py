@@ -17,12 +17,25 @@ class EventBroadcaster:
         # _subscribers is a collection of queues, with one queue for each connected subscriber.
         self._subscribers: Set[asyncio.Queue] = set() 
         self._lock = asyncio.Lock()
+        self._shutdown: bool = False
 
-    async def subscribe(self) -> AsyncGenerator[str, None]:
+    def shutdown(self) -> None:
+        """
+        Signals all active SSE streams to exit immediately during server shutdown/reload.
+        """
+        self._shutdown = True
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait({"event": "shutdown", "data": {}})
+            except Exception:
+                pass
+
+    async def subscribe(self, request: Any = None) -> AsyncGenerator[str, None]:
         """
         Registers a new subscriber and yields SSE-formatted events.
-        Automatically sends keepalive pings and cleans up on client disconnect.
+        Automatically sends keepalive pings and cleans up on client disconnect or server shutdown.
         """
+        self._shutdown = False
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         async with self._lock:
             self._subscribers.add(queue)
@@ -32,11 +45,17 @@ class EventBroadcaster:
             # Send initial connection confirmation
             yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'message': 'Subscribed to QuickDesk real-time events'})}\n\n"
 
-            while True:
+            while not self._shutdown:
+                if request and await request.is_disconnected():
+                    logger.info("[SSE] Client disconnected (is_disconnected).")
+                    break
+
                 try:
                     # Wait for an event with a 20-second timeout to send keepalive ping
                     event = await asyncio.wait_for(queue.get(), timeout=20.0)
                     event_type = event.get("event", "message")
+                    if event_type == "shutdown":
+                        break
                     payload = event.get("data", {})
                     yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
                 except asyncio.TimeoutError:
