@@ -99,6 +99,12 @@ Runs all 34 automated unit and integration tests covering JWT authentication, fa
 
 ---
 
+## Architecture Diagram
+
+![Architecture Diagram](ProjectArchitecture.png)
+
+---
+
 ## API Endpoints
 
 All authenticated endpoints require `Authorization: Bearer <token>` header (or `?token=<jwt>` query parameter for SSE).
