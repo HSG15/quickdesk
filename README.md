@@ -198,6 +198,16 @@ For this project, we chose `localStorage` to keep authentication simple. For a p
   - **Unavailable AI model**: AI suggested a Groq model that returned a 404 Not Found error. I checked which models were available and switched to `openai/gpt-oss-120b`.   
   - **Incorrect API route order**: AI placed a dynamic route before fixed routes in FastAPI. As a result, requests such as /metrics were treated as ticket IDs and threw 422 errors. Moving the fixed routes above the dynamic route solved the issue.
 
+<div align="center">
+
+### 💡 Key Learning
+
+<blockquote>
+  AI tools helped me build the application faster, but I still had to test the code, verify the results, and fix mistakes instead of blindly trusting the generated output.
+</blockquote>
+
+</div>
+
 ---
 
 ## What I Would Do With More Time
@@ -225,16 +235,6 @@ Add a soft-delete trash bin and an automated retention policy that archives reso
 
 ### 7. SLA Deadlines & Escalation Alerts
 Set target resolution times based on ticket priority (e.g., High-priority tickets must be resolved within 4 hours). Include a live countdown timer and send automated push notifications to agents when a ticket is approaching or breaching its SLA deadline.
-
-<div align="center">
-
-### 💡 Key Learning
-
-<blockquote>
-  AI tools helped me build the application faster, but I still had to test the code, verify the results, and fix mistakes instead of blindly trusting the generated output.
-</blockquote>
-
-</div>
 
 ---
 
