@@ -62,7 +62,7 @@ def seed_users():
                 print(f"  [CREATED] Seeded user: {user_data['email']} ({user_data['role']})")
 
         db.commit()
-        print(f"\nSeed complete: {created_count} users created, {skipped_count} skipped.")
+        print(f"\nUsers seed complete: {created_count} users created, {skipped_count} skipped.")
     except Exception as e:
         db.rollback()
         print(f"\nSeed failed with error: {e}")
@@ -70,9 +70,22 @@ def seed_users():
     finally:
         db.close()
 
+    # Also automatically index the knowledge base so a single seed script prepares the full system
+    print("\n--------------------------------------------------")
+    print(" Indexing Knowledge Base Articles into Chroma DB  ")
+    print("--------------------------------------------------")
+    try:
+        from app.services.rag_service import index_knowledge_base
+        kb_res = index_knowledge_base()
+        print(f"  • Articles processed: {kb_res['articles_indexed']}")
+        print(f"  • Chunks indexed: {kb_res['chunks_indexed']}")
+        print("Knowledge base index is ready!\n")
+    except Exception as e:
+        print(f"Knowledge base indexing notice: {e}")
+
 
 if __name__ == "__main__":
     print("==================================================")
-    print(" QuickDesk Seed Script — Users & Authentication   ")
+    print(" QuickDesk Seed Script — Users & Knowledge Base   ")
     print("==================================================")
     seed_users()
