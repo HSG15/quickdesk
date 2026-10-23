@@ -19,6 +19,7 @@ QuickDesk is an AI-assisted helpdesk application that helps employees raise supp
 
 No need to install Python, Node.js, or PostgreSQL locally. The only requirement is **Docker Desktop**.
 
+#### 1. Instant Startup with Docker Compose
 ```bash
 # 1. Clone repository
 git clone https://github.com/HSG15/quickdesk.git
@@ -28,12 +29,23 @@ cd quickdesk
 cp .env.example .env
 # Add your GROQ_API_KEY in .env (get a free key at https://console.groq.com/keys)
 
-# 3. Build & start Backend + Frontend + PostgreSQL
-docker compose up --build
+# 3. Pull pre-built images or build from source and run:
+docker compose pull      # pulls pre-built images from Docker Hub (hsg15/quick-desk)
+docker compose up        # starts DB + Backend + Frontend in seconds
 ```
+*(Alternatively, run `docker compose up --build` to compile from local source).*
+
 * **Frontend UI:** `http://localhost:5173`
 * **FastAPI Docs:** `http://localhost:8000/docs`
 * Database tables, demo users, and knowledge base vector index are initialized automatically on boot!
+
+#### 2. Pre-Built Images on Docker Hub
+Pre-built multi-stage production images are published on Docker Hub under [`hsg15/quick-desk`](https://hub.docker.com/r/hsg15/quick-desk):
+
+| Service | Docker Hub Pull Command | Description |
+| :--- | :--- | :--- |
+| **Backend** | `docker pull hsg15/quick-desk:backend` | FastAPI, ChromaDB, PyTorch (CPU-optimized), Sentence-Transformers |
+| **Frontend** | `docker pull hsg15/quick-desk:frontend` | React 19, TypeScript, Tailwind CSS, Vite proxy |
 
 ---
 
