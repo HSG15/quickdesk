@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: quickdesk-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quickdesk
+      POSTGRES_PASSWORD: quickdesk
+      POSTGRES_DB: quickdesk
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U quickdesk -d quickdesk" ]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quickdesk-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://quickdesk:quickdesk@db:5432/quickdesk
+      - FRONTEND_URL=http://localhost:5173
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL_NAME=${GROQ_MODEL_NAME:-llama-3.3-70b-versatile}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev_secret_key_quickdesk_ai_assessment_2026_change_in_prod}
+      - CHROMA_PERSIST_DIRECTORY=/app/chroma_db
+    volumes:
+      - chroma_data:/app/chroma_db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: quickdesk-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    environment:
+      - BACKEND_URL=http://backend:8000
+
+volumes:
+  postgres_data:
+  chroma_data:
