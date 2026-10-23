@@ -15,7 +15,31 @@ QuickDesk is an AI-assisted helpdesk application that helps employees raise supp
 
 ---
 
-### Step 1: Clone & Configure Environment
+### Option A: Run with Docker (Recommended — 1 Command)
+
+No need to install Python, Node.js, or PostgreSQL locally. The only requirement is **Docker Desktop**.
+
+```bash
+# 1. Clone repository
+git clone https://github.com/HSG15/quickdesk.git
+cd quickdesk
+
+# 2. Configure environment
+cp .env.example .env
+# Add your GROQ_API_KEY in .env (get a free key at https://console.groq.com/keys)
+
+# 3. Build & start Backend + Frontend + PostgreSQL
+docker compose up --build
+```
+* **Frontend UI:** `http://localhost:5173`
+* **FastAPI Docs:** `http://localhost:8000/docs`
+* Database tables, demo users, and knowledge base vector index are initialized automatically on boot!
+
+---
+
+### Option B: Run Manually (Local Python & Node)
+
+#### Step 1: Clone & Configure
 ```bash
 git clone https://github.com/HSG15/quickdesk.git
 cd quickdesk
@@ -27,12 +51,12 @@ Open `.env` and configure your local PostgreSQL credentials and Groq key:
 ```env
 DATABASE_URL=postgresql://<your_postgres_user>:<your_password>@localhost:5432/quickdesk
 GROQ_API_KEY=gsk_...
-GROQ_MODEL_NAME=openai/gpt-oss-120b
+GROQ_MODEL_NAME=llama-3.3-70b-versatile
 ```
 
 ---
 
-### Step 2: Set Up PostgreSQL Database
+#### Step 2: Set Up PostgreSQL Database
 Ensure your PostgreSQL server is active, then create the database:
 ```sql
 CREATE DATABASE quickdesk;
@@ -80,12 +104,14 @@ Frontend will be live at `http://localhost:5173`.
 ---
 
 ### Step 5: Demo Login Credentials
-QuickDesk includes pre-seeded accounts with built-in 1-click role toggling in the UI:
+QuickDesk includes pre-seeded accounts with 1-click quick login on the sign-in screen, or you can enter credentials manually. Sessions use `sessionStorage` for tab isolation, allowing you to open 2 browser tabs side-by-side (Tab 1 as Agent, Tab 2 as Employee) to experience live ticket lifecycle updates in real time:
 
 | Role | Email | Password | Permissions |
 | :--- | :--- | :--- | :--- |
-| **Support Agent** | `agent@quickdesk.com` | `agent123` | View KPIs, live SSE metrics, audited classification overrides, send replies & resolve |
-| **Employee** | `employee@quickdesk.com` | `employee123` | Submit tickets, track "My Tickets", view verified resolutions |
+| **Support Agent** (Alice) | `agent@quickdesk.com` | `agent123` | View KPIs, live SSE metrics, audited classification overrides, send replies & resolve |
+| **Support Agent** (Hari) | `hari@quickdesk.com` | `agent123` | View KPIs, live SSE metrics, audited classification overrides, send replies & resolve |
+| **Employee** (Bob) | `employee@quickdesk.com` | `employee123` | Submit IT tickets, track "My Tickets", view verified resolutions |
+| **Employee** (Charlie) | `charlie@quickdesk.com` | `employee123` | Submit Finance tickets, verify employee data isolation (cannot see Bob's tickets) |
 
 ---
 
