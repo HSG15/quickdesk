@@ -447,65 +447,27 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-3">
-            {currentUser ? (
+            {currentUser && (
               <div className="flex items-center space-x-3">
-                {/* 1-Click Role Switcher for Interview / Assessment Demo */}
-                <div className="hidden sm:flex items-center bg-slate-100 p-1 rounded-lg text-xs font-medium border border-slate-200">
-                  <span className="px-2 text-slate-500">Quick Switch:</span>
-                  <button
-                    onClick={() => handleLogin(undefined, 'agent@quickdesk.com', 'agent123')}
-                    className={`px-2.5 py-1 rounded transition-colors ${
-                      currentUser.role === 'agent'
-                        ? 'bg-white text-indigo-700 shadow-xs font-semibold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Agent (Alice)
-                  </button>
-                  <button
-                    onClick={() => handleLogin(undefined, 'employee@quickdesk.com', 'employee123')}
-                    className={`px-2.5 py-1 rounded transition-colors ${
-                      currentUser.role === 'employee'
-                        ? 'bg-white text-indigo-700 shadow-xs font-semibold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Employee (Bob)
-                  </button>
-                </div>
-
-                <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">
-                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-medium text-xs">
+                <div className="flex items-center space-x-2 pl-2">
+                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs ring-2 ring-indigo-50">
                     {currentUser.name.slice(0, 2).toUpperCase()}
                   </div>
-                  <div className="text-left hidden md:block">
+                  <div className="text-left hidden sm:block">
                     <p className="text-xs font-semibold text-slate-900 leading-tight">{currentUser.name}</p>
-                    <p className="text-[11px] text-slate-500 capitalize">{currentUser.role}</p>
+                    <p className="text-[11px] text-slate-500 capitalize flex items-center space-x-1">
+                      <span className={`w-1.5 h-1.5 rounded-full ${currentUser.role === 'agent' ? 'bg-indigo-500' : 'bg-emerald-500'}`} />
+                      <span>{currentUser.role}</span>
+                    </p>
                   </div>
                 </div>
 
                 <button
                   onClick={handleLogout}
-                  title="Logout"
-                  className="p-1.5 text-slate-500 hover:text-slate-800 rounded-md hover:bg-slate-100 transition-colors"
+                  title="Sign Out"
+                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-slate-100 transition-colors ml-1"
                 >
                   <LogOut className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-2 text-xs">
-                <span className="text-slate-500">Demo Accounts:</span>
-                <button
-                  onClick={() => handleLogin(undefined, 'agent@quickdesk.com', 'agent123')}
-                  className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium rounded border border-indigo-200 transition-colors"
-                >
-                  Agent Login
-                </button>
-                <button
-                  onClick={() => handleLogin(undefined, 'employee@quickdesk.com', 'employee123')}
-                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded border border-slate-200 transition-colors"
-                >
-                  Employee Login
                 </button>
               </div>
             )}
@@ -573,16 +535,32 @@ export default function App() {
                   onClick={() => handleLogin(undefined, 'agent@quickdesk.com', 'agent123')}
                   className="p-2 border border-indigo-200 rounded-lg bg-indigo-50/50 hover:bg-indigo-50 text-indigo-700 text-left transition-colors"
                 >
-                  <p className="font-semibold">Alice (Support Agent)</p>
-                  <p className="text-[10px] text-indigo-500">agent@quickdesk.com</p>
+                  <p className="font-semibold truncate">Alice (Support Agent)</p>
+                  <p className="text-[10px] text-indigo-500 truncate">agent@quickdesk.com</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleLogin(undefined, 'hari@quickdesk.com', 'agent123')}
+                  className="p-2 border border-indigo-200 rounded-lg bg-indigo-50/50 hover:bg-indigo-50 text-indigo-700 text-left transition-colors"
+                >
+                  <p className="font-semibold truncate">Hari (Support Agent)</p>
+                  <p className="text-[10px] text-indigo-500 truncate">hari@quickdesk.com</p>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleLogin(undefined, 'employee@quickdesk.com', 'employee123')}
                   className="p-2 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-left transition-colors"
                 >
-                  <p className="font-semibold">Bob (Employee)</p>
-                  <p className="text-[10px] text-slate-500">employee@quickdesk.com</p>
+                  <p className="font-semibold truncate">Bob (IT Employee)</p>
+                  <p className="text-[10px] text-slate-500 truncate">employee@quickdesk.com</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleLogin(undefined, 'charlie@quickdesk.com', 'employee123')}
+                  className="p-2 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-left transition-colors"
+                >
+                  <p className="font-semibold truncate">Charlie (Finance)</p>
+                  <p className="text-[10px] text-slate-500 truncate">charlie@quickdesk.com</p>
                 </button>
               </div>
             </div>

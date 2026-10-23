@@ -28,6 +28,12 @@ DEMO_USERS = [
         "password": "employee123",
         "role": "employee",
     },
+    {
+        "name": "Hari (Agent)",
+        "email": "hari@quickdesk.com",
+        "password": "agent123",
+        "role": "agent",
+    }
 ]
 
 
@@ -41,16 +47,19 @@ def seed_users():
 
     db = SessionLocal()
     created_count = 0
-    skipped_count = 0
+    updated_count = 0
 
     try:
         for user_data in DEMO_USERS:
+            hashed = get_password_hash(user_data["password"])
             existing = db.query(User).filter(User.email == user_data["email"]).first()
             if existing:
-                print(f"  [SKIPPED] User already exists: {user_data['email']} ({existing.role})")
-                skipped_count += 1
+                existing.name = user_data["name"]
+                existing.role = user_data["role"]
+                existing.password_hash = hashed
+                print(f"  [UPDATED] User credentials sync'd: {user_data['email']} ({existing.role})")
+                updated_count += 1
             else:
-                hashed = get_password_hash(user_data["password"])
                 new_user = User(
                     name=user_data["name"],
                     email=user_data["email"],
@@ -62,7 +71,7 @@ def seed_users():
                 print(f"  [CREATED] Seeded user: {user_data['email']} ({user_data['role']})")
 
         db.commit()
-        print(f"\nUsers seed complete: {created_count} users created, {skipped_count} skipped.")
+        print(f"\nUsers seed complete: {created_count} users created, {updated_count} updated.")
     except Exception as e:
         db.rollback()
         print(f"\nSeed failed with error: {e}")
