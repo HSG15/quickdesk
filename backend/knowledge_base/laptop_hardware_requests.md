@@ -2,21 +2,34 @@
 
 **Article ID:** KB-IT-003  
 **Category:** IT  
-**Last Updated:** 2026-01-25  
+**Last Updated:** 2026-10-25
 
-## Overview
-QuickDesk provisions standardized computing hardware to all employees based on their technical workload requirements.
+## Standard equipment
+- **Engineering / Data roles:** 16-inch MacBook Pro (Apple Silicon M-series, 36 GB RAM) or Lenovo ThinkPad P1.
+- **Business / Operations roles:** 14-inch MacBook Air (Apple Silicon, 16 GB RAM) or Dell Latitude 7440.
+- Actual equipment depends on role requirements and availability.
 
-## Standard Equipment Specifications
-- **Engineering / Data Roles:** 16-inch MacBook Pro (Apple Silicon M-series, 36GB RAM) or Lenovo ThinkPad P1.
-- **Business / Operations Roles:** 14-inch MacBook Air (Apple Silicon, 16GB RAM) or Dell Latitude 7440.
+## Refresh and replacement
+- Laptops are scheduled for refresh every **36 months** from deployment.
+- Employees receive an email **30 days before** refresh eligibility.
+- For eligibility, open a QuickDesk IT ticket with the device asset tag and deployment date if known.
 
-## Hardware Refresh Lifecycle
-- Laptops are scheduled for full hardware refresh every 36 months (3 years) from original deployment date.
-- Employees receive an automated email notification 30 days prior to their refresh eligibility date.
+## Damaged or unsafe devices
+- **Swollen battery or overheating:** Stop using the device, disconnect power and power it off if safe, and alert IT safety personnel immediately. Do not attempt battery repair.
+- **Cracked screen or liquid spill:** Open an IT ticket titled `Hardware Repair: [Model]`. Do not turn a liquid-damaged device back on.
+- **Loaners:** Same-day pickup at the IT Tech Bar (HQ Floor 3); remote courier delivery within 24 business hours, subject to availability.
+- **Return:** Return replaced hardware in company prepaid packaging within **14 days** of receiving the replacement.
 
-## Defective or Damaged Hardware
-- **Swollen Batteries or Overheating:** Immediately disconnect power, power off the machine, and alert IT safety personnel.
-- **Physical Damage (Cracked Screen, Liquid Spills):** Submit a QuickDesk IT ticket titled `Hardware Repair: [Model]`. 
-- **Loaner Laptops:** Same-day loaner laptops can be picked up at the IT Tech Bar (HQ Floor 3) or dispatched by express courier for remote employees within 24 business hours.
-- **Equipment Return:** Defective hardware must be returned in company-provided prepaid packaging within 14 days of receiving a replacement.
+For accessories (monitor, keyboard, mouse, dock, charger), open an IT ticket and explain the business need. Approval and delivery time are not guaranteed by this policy.
+
+## Quick FAQs
+- **Refresh cycle:** 36 months.
+- **Swollen battery:** Stop using it and alert IT safety.
+- **Cracked screen:** Ticket title `Hardware Repair: [Model]`.
+- **Loaner:** Same-day HQ pickup; remote courier target 24 business hours, subject to availability.
+
+## Demo tickets
+- **Title:** My laptop screen is cracked  
+  **Description:** My company laptop screen cracked today. How should I report it and request a repair or loaner?
+- **Title:** My laptop is overheating  
+  **Description:** My laptop is unusually hot and the battery area looks swollen. What should I do immediately?

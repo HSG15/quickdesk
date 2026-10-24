@@ -94,6 +94,7 @@ async def create_ticket(
         ticket_in.title,
         ticket_in.description,
         classification.category,
+        current_user.name,
     )
 
     ticket = Ticket(
@@ -144,7 +145,13 @@ def regenerate_draft_reply(
             detail="Ticket not found",
         )
 
-    rag_result = generate_rag_reply(ticket.title, ticket.description, category=ticket.category)
+    employee_name = ticket.employee.name if ticket.employee else None
+    rag_result = generate_rag_reply(
+        ticket.title,
+        ticket.description,
+        category=ticket.category,
+        user_name=employee_name,
+    )
     ticket.ai_draft_reply = rag_result["draft_reply"]
     ticket.citations_json = json.dumps(rag_result["citations"])
 
@@ -477,4 +484,3 @@ def get_ticket_audit_logs(
         .all()
     )
     return audit_logs
-

@@ -24,6 +24,90 @@ import {
 import { api, clearStoredToken, getStoredToken } from './api/client'
 import type { User, Ticket, AuditLog, TicketCategory, TicketPriority, TicketMetrics } from './types'
 
+function extractFirstName(fullName?: string | null): string {
+  if (!fullName) return ''
+  const withoutParens = fullName.replace(/\s*\([^)]*\)/g, '').trim() || fullName.trim()
+  return withoutParens.split(/\s+/)[0] || withoutParens
+}
+
+function renderFormattedDraft(text: string | null | undefined, userName?: string | null): React.ReactNode {
+  if (!text) return null
+  let formatted = text
+  if (userName) {
+    const cleanName = extractFirstName(userName)
+    formatted = formatted.replace(/^(Hello|Hi|Dear)(\s+[^,\n]+)?,/i, `Hello ${cleanName},`)
+  }
+
+  const tokens = formatted.split(/(\*\*[\s\S]*?\*\*|<b>[\s\S]*?<\/b>|<strong>[\s\S]*?<\/strong>)/g)
+  return (
+    <>
+      {tokens.map((token, idx) => {
+        if (token.startsWith('**') && token.endsWith('**') && token.length >= 4) {
+          const inner = token.slice(2, -2)
+          return (
+            <strong key={idx} className="font-bold text-indigo-950">
+              {inner}
+            </strong>
+          )
+        }
+        if (token.startsWith('<b>') && token.endsWith('</b>')) {
+          const inner = token.slice(3, -4)
+          return (
+            <strong key={idx} className="font-bold text-indigo-950">
+              {inner}
+            </strong>
+          )
+        }
+        if (token.startsWith('<strong>') && token.endsWith('</strong>')) {
+          const inner = token.slice(8, -9)
+          return (
+            <strong key={idx} className="font-bold text-indigo-950">
+              {inner}
+            </strong>
+          )
+        }
+        return <span key={idx}>{token}</span>
+      })}
+    </>
+  )
+}
+
+function renderFormattedFinalReply(text: string | null | undefined): React.ReactNode {
+  if (!text) return null
+  const tokens = text.split(/(\*\*[\s\S]*?\*\*|<b>[\s\S]*?<\/b>|<strong>[\s\S]*?<\/strong>)/g)
+  return (
+    <>
+      {tokens.map((token, idx) => {
+        if (token.startsWith('**') && token.endsWith('**') && token.length >= 4) {
+          const inner = token.slice(2, -2)
+          return (
+            <strong key={idx} className="font-bold text-emerald-950">
+              {inner}
+            </strong>
+          )
+        }
+        if (token.startsWith('<b>') && token.endsWith('</b>')) {
+          const inner = token.slice(3, -4)
+          return (
+            <strong key={idx} className="font-bold text-emerald-950">
+              {inner}
+            </strong>
+          )
+        }
+        if (token.startsWith('<strong>') && token.endsWith('</strong>')) {
+          const inner = token.slice(8, -9)
+          return (
+            <strong key={idx} className="font-bold text-emerald-950">
+              {inner}
+            </strong>
+          )
+        }
+        return <span key={idx}>{token}</span>
+      })}
+    </>
+  )
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -305,7 +389,13 @@ export default function App() {
     setActiveTicket(ticket)
     setOverrideCategory(ticket.category)
     setOverridePriority(ticket.priority)
-    setReplyText(ticket.final_reply || ticket.ai_draft_reply || '')
+    let initialReply = ticket.final_reply || ticket.ai_draft_reply || ''
+    const name = ticket.employee?.name || currentUser?.name
+    if (name && !ticket.final_reply && initialReply) {
+      const cleanName = extractFirstName(name)
+      initialReply = initialReply.replace(/^(Hello|Hi|Dear)(\s+[^,\n]+)?,/i, `Hello ${cleanName},`)
+    }
+    setReplyText(initialReply)
     setActionSuccessMessage(null)
 
     // Fetch audit history
@@ -365,7 +455,13 @@ export default function App() {
       const updated = await api.regenerateDraftReply(activeTicket.id)
       setActiveTicket(updated)
       setAgentTickets(agentTickets.map((t) => (t.id === updated.id ? updated : t)))
-      setReplyText(updated.ai_draft_reply || '')
+      let text = updated.ai_draft_reply || ''
+      const name = updated.employee?.name || activeTicket?.employee?.name || currentUser?.name
+      if (name && text) {
+        const cleanName = extractFirstName(name)
+        text = text.replace(/^(Hello|Hi|Dear)(\s+[^,\n]+)?,/i, `Hello ${cleanName},`)
+      }
+      setReplyText(text)
       setActionSuccessMessage('AI Draft regenerated from Knowledge Base context!')
       setTimeout(() => setActionSuccessMessage(null), 3000)
     } catch (err: unknown) {
@@ -437,13 +533,7 @@ export default function App() {
             <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-sm">
               Q
             </div>
-            <div>
-              <span className="font-semibold text-slate-900 text-lg tracking-tight">QuickDesk</span>
-              <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center space-x-1 inline-flex">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>AI-Assisted Helpdesk • Production</span>
-              </span>
-            </div>
+            <span className="font-semibold text-slate-900 text-lg tracking-tight">QuickDesk</span>
           </div>
 
           <div className="flex items-center space-x-3">
@@ -668,16 +758,14 @@ export default function App() {
                   </div>
                   <div className="flex items-center space-x-3">
                     <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${
-                        sseConnected
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-amber-50 text-amber-700 border-amber-200'
-                      }`}
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${sseConnected
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}
                     >
                       <span
-                        className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                          sseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                        }`}
+                        className={`w-1.5 h-1.5 rounded-full mr-1.5 ${sseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                          }`}
                       />
                       <span>{sseConnected ? 'Live Sync Active' : 'Connecting...'}</span>
                     </span>
@@ -710,11 +798,10 @@ export default function App() {
                             <p className="text-xs text-slate-500 line-clamp-1 mt-1">{t.description}</p>
                           </div>
                           <span
-                            className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${
-                              t.status === 'Resolved'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-blue-50 text-blue-700 border-blue-200'
-                            }`}
+                            className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full border ${t.status === 'Resolved'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}
                           >
                             {t.status}
                           </span>
@@ -751,11 +838,10 @@ export default function App() {
                       <div className="flex items-center space-x-2">
                         <span className="text-xs font-mono text-slate-400">#{selectedEmployeeTicket.id}</span>
                         <span
-                          className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                            selectedEmployeeTicket.status === 'Resolved'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-blue-50 text-blue-700 border-blue-200'
-                          }`}
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full border ${selectedEmployeeTicket.status === 'Resolved'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}
                         >
                           {selectedEmployeeTicket.status}
                         </span>
@@ -795,7 +881,7 @@ export default function App() {
                           <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
                           Final Reply from Support:
                         </p>
-                        {selectedEmployeeTicket.final_reply}
+                        {renderFormattedFinalReply(selectedEmployeeTicket.final_reply)}
                         {selectedEmployeeTicket.resolved_at && (
                           <p className="text-[10px] text-emerald-600 mt-2">
                             Resolved at: {new Date(selectedEmployeeTicket.resolved_at).toLocaleString()}
@@ -862,16 +948,14 @@ export default function App() {
               <div className="flex items-center space-x-2.5 text-xs">
                 {/* Live SSE Pulse Indicator */}
                 <div
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    sseConnected
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                  }`}
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${sseConnected
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}
                 >
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      sseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
-                    }`}
+                    className={`w-2 h-2 rounded-full ${sseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                      }`}
                   />
                   <span>{sseConnected ? 'Live SSE Connected' : 'Reconnecting...'}</span>
                 </div>
@@ -879,11 +963,10 @@ export default function App() {
                 {/* Sound Alert Toggle */}
                 <button
                   onClick={() => setAudioEnabled(!audioEnabled)}
-                  className={`p-1.5 rounded-lg border text-xs transition-colors flex items-center space-x-1 cursor-pointer ${
-                    audioEnabled
-                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                      : 'bg-slate-100 text-slate-400 border-slate-200'
-                  }`}
+                  className={`p-1.5 rounded-lg border text-xs transition-colors flex items-center space-x-1 cursor-pointer ${audioEnabled
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    : 'bg-slate-100 text-slate-400 border-slate-200'
+                    }`}
                   title={audioEnabled ? 'Audible chime enabled on incoming tickets' : 'Audible chime muted'}
                 >
                   {audioEnabled ? <Volume2 className="w-4 h-4 text-indigo-600" /> : <VolumeX className="w-4 h-4" />}
@@ -1080,9 +1163,8 @@ export default function App() {
                             <tr
                               key={t.id}
                               onClick={() => selectAgentTicket(t)}
-                              className={`cursor-pointer transition-colors ${
-                                isSelected ? 'bg-indigo-50/60' : 'hover:bg-slate-50'
-                              }`}
+                              className={`cursor-pointer transition-colors ${isSelected ? 'bg-indigo-50/60' : 'hover:bg-slate-50'
+                                }`}
                             >
                               <td className="py-3 px-3 font-mono text-slate-400">#{t.id}</td>
                               <td className="py-3 px-3">
@@ -1104,11 +1186,10 @@ export default function App() {
                               </td>
                               <td className="py-3 px-3">
                                 <span
-                                  className={`inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border ${
-                                    t.status === 'Resolved'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : 'bg-blue-50 text-blue-700 border-blue-200'
-                                  }`}
+                                  className={`inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border ${t.status === 'Resolved'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                                    }`}
                                 >
                                   {t.status}
                                 </span>
@@ -1137,11 +1218,10 @@ export default function App() {
                         <div className="flex items-center space-x-2">
                           <span className="text-xs font-mono text-slate-400">Ticket #{activeTicket.id}</span>
                           <span
-                            className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                              activeTicket.status === 'Resolved'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-blue-50 text-blue-700 border-blue-200'
-                            }`}
+                            className={`text-xs font-medium px-2 py-0.5 rounded-full border ${activeTicket.status === 'Resolved'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}
                           >
                             {activeTicket.status}
                           </span>
@@ -1328,14 +1408,24 @@ export default function App() {
                             </div>
                             {activeTicket.status !== 'Resolved' && (
                               <button
-                                onClick={() => setReplyText(activeTicket.ai_draft_reply || '')}
+                                onClick={() => {
+                                  let text = activeTicket.ai_draft_reply || ''
+                                  const name = activeTicket.employee?.name || currentUser?.name
+                                  if (name) {
+                                    const cleanName = extractFirstName(name)
+                                    text = text.replace(/^(Hello|Hi|Dear)(\s+[^,\n]+)?,/i, `Hello ${cleanName},`)
+                                  }
+                                  setReplyText(text)
+                                }}
                                 className="text-[10px] text-indigo-600 hover:underline font-normal cursor-pointer"
                               >
                                 Copy to reply
                               </button>
                             )}
                           </div>
-                          <p className="italic text-indigo-800/80 whitespace-pre-wrap">{activeTicket.ai_draft_reply}</p>
+                          <p className="italic text-indigo-800/80 whitespace-pre-wrap">
+                            {renderFormattedDraft(activeTicket.ai_draft_reply, activeTicket.employee?.name || currentUser?.name)}
+                          </p>
                         </div>
                       )}
 
